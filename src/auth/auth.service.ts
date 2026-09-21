@@ -16,6 +16,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
       include: {
+        tenant: { select: { status: true } },
         role: {
           include: { permissions: { include: { permission: true } } },
         },
@@ -23,8 +24,8 @@ export class AuthService {
     });
 
     // Mensagem genérica em ambos os casos (email inexistente, senha errada,
-    // conta desabilitada) para não dar pista a quem está tentando enumerar contas.
-    if (!user || user.status !== 'active') {
+    // conta desabilitada, tenant suspenso) para não dar pista a quem está tentando enumerar contas.
+    if (!user || user.status !== 'active' || user.tenant.status !== 'active') {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 

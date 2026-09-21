@@ -81,13 +81,20 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 
 ## Autenticação e autorização (`src/auth`)
 
-- Login: `POST /auth/login` com `{ email, password }` → retorna um JWT (`accessToken`) contendo `tenantId`, `roleId` e as `permissions` (chaves do catálogo de `Permission`) do usuário.
+- Login: `POST /auth/login` com `{ email, password }` → retorna um JWT (`accessToken`) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`).
 - Toda rota é protegida por padrão (`JwtAuthGuard` global). Para deixar uma rota pública, use `@Public()`.
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
-- `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões do token contra as exigidas pela rota.
+- `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
 - `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions }` no handler.
 - Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` contra força bruta.
 - `helmet` aplica cabeçalhos de segurança padrão (CSP, HSTS, etc.) em todas as respostas.
 - `RequestLoggerMiddleware` loga método/rota/status/duração/IP de cada request (auditoria básica).
 
-**Limitação conhecida:** as permissões ficam "congeladas" no token no momento do login — mudar o papel/permissões de um usuário só tem efeito no próximo login dele. Aceitável para o MVP; token de curta duração (`JWT_EXPIRES_IN`) mitiga.
+**Estado sempre fresco.** O token só prova identidade: a cada request o `JwtStrategy` relê do banco o usuário, o status do tenant e as permissões do papel (uma query por PK). Por isso desativar um usuário, suspender um tenant ou mudar as permissões de um papel tem efeito imediato (401/403), sem esperar o token expirar nem exigir novo login. Login também é recusado (401, mesma mensagem genérica) para usuário desativado ou tenant suspenso.
+
+**Suspensão de tenant** é ação da plataforma: `status` não é aceito em `PATCH /tenants/:id`, para o admin da clínica não conseguir suspender (ou reativar) o próprio tenant. Enquanto não existir um painel/papel de plataforma, altera-se direto no banco.
+
+## Testes
+
+- `npm test` — unitários (não precisam de banco).
+- `npm run test:e2e` — ponta a ponta de autenticação/autorização (`test/auth.e2e-spec.ts`); usa o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte.
