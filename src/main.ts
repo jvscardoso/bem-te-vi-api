@@ -5,6 +5,8 @@ import { AppModule } from './app.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Faz o SIGTERM do `docker stop` fechar o Nest (e o pool do Prisma) em vez de matar o processo.
+  app.enableShutdownHooks();
   app.use(helmet());
   app.enableCors();
   app.useGlobalPipes(

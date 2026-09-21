@@ -10,6 +10,30 @@ services:
       - '5432:5432'
     volumes:
       - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U user -d bem_te_vi']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # A API só sobe com `--profile app`, para `docker compose up -d` continuar subindo só o
+  # banco (fluxo de dev com a API no host e hot reload).
+  #   docker compose --profile app up -d --build
+  api:
+    profiles: ['app']
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Dentro da rede do compose o banco é o host "db", não localhost.
+      DATABASE_URL: postgresql://user:password@db:5432/bem_te_vi?schema=public
+      # Vem do .env (ou do ambiente); sem ele a API não sobe.
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+    ports:
+      - '${PORT:-3000}:3000'
 
 volumes:
   db_data:

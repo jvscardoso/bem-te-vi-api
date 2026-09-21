@@ -40,6 +40,22 @@ API do bem-te-vi — SaaS whitelabel de gestão de clínicas e hospitais (agenda
    npm run start:dev
    ```
 
+### Rodando tudo em containers
+
+Alternativa ao passo a passo acima: sobe Postgres + API na imagem do `Dockerfile`. Só precisa do `.env` (o `JWT_SECRET` é obrigatório):
+
+```bash
+docker compose --profile app up -d --build
+```
+
+Na subida, o container aplica as migrations (`prisma migrate deploy`) e o seed do catálogo de permissões (idempotente) antes de iniciar a API em `http://localhost:3000` (`PORT` do `.env` muda a porta do host). Sem `--profile app`, `docker compose up -d` continua subindo só o banco, para o fluxo de dev com a API no host e hot reload.
+
+Notas para deploy:
+- Imagem multi-stage (`node:24-bookworm-slim`), roda como usuário não-root, com `HEALTHCHECK` em `GET /` e shutdown gracioso no SIGTERM.
+- Configuração toda por variável de ambiente (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`); `.env` nunca entra na imagem.
+- Migrate + seed rodam em cada start do container. Com mais de uma réplica, mova essa etapa para um passo único de release.
+- A imagem mantém o `node_modules` completo (CLI do Prisma e `tsx` para migrate/seed), então fica grande (~1 GB); dá para enxugar depois separando um job de migração.
+
 ## Modelo de dados
 
 Fonte da verdade: `prisma/schema.prisma`. Cobre tenancy/branding (whitelabel), usuários e papéis com permissões, pacientes com ficha de anamnese (soft delete) e agenda de consultas.
