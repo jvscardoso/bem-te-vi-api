@@ -1,0 +1,218 @@
+// Bem-te-vi API — schema do MVP (PostgreSQL 15+)
+//
+// Convenções:
+//   * id: uuid (@default(uuid()))
+//   * tenantId: presente em toda entidade de negócio — base do isolamento multi-tenant
+//     (shared DB + tenantId; Row Level Security fica como camada extra a considerar depois)
+//   * createdAt/updatedAt: mantidos pelo Prisma (@default(now()) / @updatedAt)
+//   * soft delete: só em Patient (deletedAt), por ser dado de prontuário
+//   * Json: usado onde a forma dos dados varia por tenant (branding, respostas de anamnese, endereço)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// 01. TENANCY & ACESSO
+// =============================================================================
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+model Tenant {
+  id            String       @id @default(uuid())
+  name          String       @db.VarChar(150)
+  subdomain     String       @unique @db.VarChar(63)
+  customDomain  String?      @unique @map("custom_domain") @db.VarChar(255)
+  status        TenantStatus @default(active)
+  // Duração do atendimento usada quando o agendamento não informa o fim e o profissional
+  // não tem duração própria; e o piso aplicado a qualquer agendamento da clínica
+  // (ex.: estética 30 min; psicologia com mínimo de 60 min).
+  defaultAppointmentDurationMinutes Int @default(30) @map("default_appointment_duration_minutes")
+  minAppointmentDurationMinutes     Int @default(5)  @map("min_appointment_duration_minutes")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  branding      TenantBranding?
+  users         User[]
+  roles         Role[]
+  patients      Patient[]
+  appointments  Appointment[]
+
+  @@map("tenants")
+}
+
+model TenantBranding {
+  id              String   @id @default(uuid())
+  tenantId        String   @unique @map("tenant_id")
+  tradeName       String?  @map("trade_name") @db.VarChar(150)
+  logoUrl         String?  @map("logo_url")
+  primaryColor    String?  @map("primary_color") @db.VarChar(7)
+  secondaryColor  String?  @map("secondary_color") @db.VarChar(7)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_branding")
+}
+
+enum UserStatus {
+  active
+  invited
+  disabled
+}
+
+// email único globalmente (não por tenant) — simplifica login no MVP.
+// Guardar sempre em minúsculas na aplicação antes de gravar/consultar.
+// Se um profissional precisar atender em duas clínicas, isso vira uma
+// limitação real; a saída é evoluir para pessoa + membership por tenant.
+model User {
+  id            String     @id @default(uuid())
+  tenantId      String     @map("tenant_id")
+  roleId        String     @map("role_id")
+  name          String     @db.VarChar(150)
+  email         String     @unique @db.VarChar(150)
+  passwordHash  String     @map("password_hash")
+  status        UserStatus @default(active)
+  // Sobrescreve a duração padrão da clínica para os agendamentos deste profissional.
+  defaultAppointmentDurationMinutes Int? @map("default_appointment_duration_minutes")
+  lastLoginAt   DateTime?  @map("last_login_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  tenant        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  anamnesisRecords AnamnesisRecord[]
+  appointments  Appointment[] @relation("AppointmentProfessional")
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Role {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  name         String   @db.VarChar(80)
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users        User[]
+  permissions  RolePermission[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+// Catálogo global de permissões (ex.: "patients:create", "appointments:manage").
+// Não é por tenant — cada tenant só escolhe quais permissões cada role tem.
+model Permission {
+  id           String   @id @default(uuid())
+  key          String   @unique @db.VarChar(100)
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  roles        RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId        String @map("role_id")
+  permissionId  String @map("permission_id")
+
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// =============================================================================
+// 02. PACIENTES & ANAMNESE
+// =============================================================================
+
+model Patient {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  fullName    String    @map("full_name") @db.VarChar(150)
+  cpf         String?   @db.VarChar(14)
+  birthDate   DateTime? @map("birth_date") @db.Date
+  phone       String?   @db.VarChar(20)
+  email       String?   @db.VarChar(150)
+  address     Json?
+  notes       String?
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  anamnesisRecords  AnamnesisRecord[]
+  appointments      Appointment[]
+
+  @@unique([tenantId, cpf])
+  @@index([tenantId])
+  @@map("patients")
+}
+
+// Ficha de anamnese preenchida para um paciente. MVP: resposta livre em jsonb;
+// um formulário configurável por tenant (AnamnesisTemplate) fica para depois.
+model AnamnesisRecord {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  patientId     String   @map("patient_id")
+  filledByUserId String  @map("filled_by_user_id")
+  answers       Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  filledBy      User     @relation(fields: [filledByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([patientId])
+  @@map("anamnesis_records")
+}
+
+// =============================================================================
+// 03. AGENDA
+// =============================================================================
+
+enum AppointmentStatus {
+  scheduled
+  confirmed
+  completed
+  cancelled
+  no_show
+}
+
+model Appointment {
+  id               String            @id @default(uuid())
+  tenantId         String            @map("tenant_id")
+  patientId        String            @map("patient_id")
+  professionalId   String            @map("professional_id")
+  scheduledAt      DateTime          @map("scheduled_at")
+  endsAt           DateTime          @map("ends_at")
+  status           AppointmentStatus @default(scheduled)
+  notes            String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  professional User    @relation("AppointmentProfessional", fields: [professionalId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([professionalId, scheduledAt])
+  @@index([patientId])
+  @@map("appointments")
+}
