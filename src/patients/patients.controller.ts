@@ -23,6 +23,13 @@ export class PatientsController {
     return this.patientsService.findAll(tenantId);
   }
 
+  // Antes de ':id' para não ser tratada como um id. Só quem pode escrever vê/restaura removidos.
+  @RequirePermissions('patients:write')
+  @Get('removed')
+  findRemoved(@Param('tenantId') tenantId: string) {
+    return this.patientsService.findRemoved(tenantId);
+  }
+
   @RequirePermissions('patients:read')
   @Get(':id')
   findOne(@Param('tenantId') tenantId: string, @Param('id') id: string) {
@@ -43,6 +50,12 @@ export class PatientsController {
   @Delete(':id')
   remove(@Param('tenantId') tenantId: string, @Param('id') id: string) {
     return this.patientsService.remove(tenantId, id);
+  }
+
+  @RequirePermissions('patients:write')
+  @Post(':id/restore')
+  restore(@Param('tenantId') tenantId: string, @Param('id') id: string) {
+    return this.patientsService.restore(tenantId, id);
   }
 
   @RequirePermissions('patients:write')

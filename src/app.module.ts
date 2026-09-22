@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
@@ -15,6 +15,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard.js';
 import { TenantAccessGuard } from './auth/guards/tenant-access.guard.js';
 import { PermissionsGuard } from './auth/guards/permissions.guard.js';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware.js';
+import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_FILTER, useClass: PrismaExceptionFilter },
     // Ordem importa: rate limit -> autenticação -> isolamento de tenant -> permissões.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -80,6 +80,12 @@ Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 
 Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
 
+## Pacientes
+
+- CRUD sob `/tenants/:tenantId/patients`; `DELETE` é soft delete (o registro e as fichas de anamnese continuam no banco, só somem das leituras).
+- **CPF único por tenant, inclusive entre removidos.** O CPF de um paciente removido continua reservado, para não duplicar cadastro/prontuário. Tentar cadastrar (ou trocar para) esse CPF devolve `409` com `removedPatientId`, para o cliente oferecer "restaurar".
+- **Restauração:** `GET /patients/removed` lista os removidos e `POST /patients/:id/restore` desfaz o soft delete (dados e anamnese voltam intactos). Ambos exigem `patients:write`.
+
 ## Agenda
 
 **Duração do atendimento.** `POST /tenants/:tenantId/appointments` aceita dois modos:
@@ -113,4 +119,8 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 ## Testes
 
 - `npm test` — unitários (não precisam de banco).
-- `npm run test:e2e` — ponta a ponta de autenticação/autorização (`test/auth.e2e-spec.ts`); usa o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte.
+- `npm run test:e2e` — ponta a ponta, contra o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte. Setup compartilhado em `test/helpers/e2e.ts`.
+  - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
+  - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF único, anamnese, isolamento.
+  - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
+  - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
