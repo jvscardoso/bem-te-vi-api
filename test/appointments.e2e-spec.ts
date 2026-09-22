@@ -451,7 +451,7 @@ describe('Agenda de consultas (e2e)', () => {
 
     it('a listagem de um tenant nunca traz agendamentos de outro', async () => {
       const res = await ctx.http().get(url(b)).set(b.auth).expect(200);
-      expect((res.body as { tenantId: string }[]).every((x) => x.tenantId === b.tenantId)).toBe(true);
+      expect((res.body.data as { tenantId: string }[]).every((x) => x.tenantId === b.tenantId)).toBe(true);
     });
 
     it('quem só tem appointments:read lê a agenda mas não escreve', async () => {
@@ -474,7 +474,7 @@ describe('Agenda de consultas (e2e)', () => {
     let p1: { id: string };
     let p2: { id: string };
     const listUrl = (query: string) => `${url(a)}?${query}`;
-    const ids = (body: { id: string }[]) => body.map((x) => x.id);
+    const ids = (body: { data: { id: string }[] }) => body.data.map((x) => x.id);
 
     let d10_08: string, d10_10: string, d10_12: string, d11_09: string;
 

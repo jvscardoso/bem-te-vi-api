@@ -130,6 +130,20 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 - Transições de status: `scheduled → confirmed | completed | cancelled | no_show`; `confirmed → completed | cancelled | no_show`. `completed`, `cancelled` e `no_show` são finais: só as observações podem mudar.
 - `DELETE` cancela o agendamento (não apaga).
 
+**Listagem, filtros e paginação.** `GET /tenants/:tenantId/appointments`:
+
+| Parâmetro | Regra |
+|---|---|
+| `professionalId`, `patientId` | UUID do profissional / paciente |
+| `from`, `to` | janela de datas (ISO 8601); qualquer um dos dois pode ser omitido |
+| `status` | um ou mais status: `status=scheduled,confirmed` (ou repetido, `status=a&status=b`); sem o parâmetro, todos; vazio = sem filtro |
+| `page` | padrão `1` |
+| `pageSize` | padrão `50`, máximo `200` (maior que o dos pacientes: uma visão de calendário precisa de muitos itens de uma vez) |
+
+**Janela `from`/`to` por sobreposição.** Entram os agendamentos que ocupam algum instante da janela: os que **terminam depois de `from`** e **começam até `to`** (inclusive). Assim um atendimento em andamento (09:30–10:30 com `from=10:00`) e um mais longo que a janela aparecem; quem termina exatamente em `from` só encosta e fica de fora; quem começa exatamente em `to` entra. `from` depois de `to` → `400`.
+
+Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" } }`, do mais cedo ao mais tarde, com desempate por id (dois agendamentos no mesmo horário não trocam de lugar entre páginas). O `total` respeita todos os filtros. Página além da última devolve `data: []`; parâmetro inválido ou desconhecido → `400`. Sem `status`, cancelados e faltas aparecem (com o `status`): para uma grade sem eles, use `status=scheduled,confirmed,completed`. O índice `(tenant_id, scheduled_at)` sustenta a consulta; a condição de fim (`endsAt > from`) é filtrada em cima dele, o que basta para o volume de uma clínica, mas, com anos de histórico e janelas no passado, vale medir e considerar um índice em `(tenant_id, ends_at)`.
+
 ## Autenticação e autorização (`src/auth`)
 
 - Login: `POST /auth/login` com `{ email, password }` → retorna um JWT (`accessToken`) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`).
@@ -166,6 +180,8 @@ Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes va
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese, isolamento.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.
   - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
+  - `appointments-filters.e2e-spec.ts` — janela `from`/`to` por sobreposição (em andamento, envolvente, bordas exatas) e filtro por `status` (lista, repetido, vazio, inválido, combinações).
+  - `appointments-pagination.e2e-spec.ts` — paginação da agenda: páginas sem repetir/pular, desempate estável (5 agendamentos no mesmo horário), total conforme filtros, limites e validação.
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
   - `account-rules.e2e-spec.ts` — escalada de privilégio (usuários e papéis), último administrador e corrida entre admins (sem o lock por tenant os testes de concorrência falham).

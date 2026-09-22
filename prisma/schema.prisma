@@ -212,7 +212,9 @@ model Appointment {
   patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   professional User    @relation("AppointmentProfessional", fields: [professionalId], references: [id], onDelete: Restrict)
 
-  @@index([tenantId])
+  // (tenantId, scheduledAt) serve à listagem paginada (filtra o tenant e ordena/filtra por horário);
+  // substitui o índice só por tenantId, que ele já cobre.
+  @@index([tenantId, scheduledAt])
   @@index([professionalId, scheduledAt])
   @@index([patientId])
   @@map("appointments")

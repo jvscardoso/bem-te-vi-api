@@ -5,11 +5,7 @@ import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto.js';
-
-export interface Page<T> {
-  data: T[];
-  meta: { total: number; page: number; pageSize: number; totalPages: number };
-}
+import { pageOf, type Page } from '../common/pagination/page.js';
 
 // Palavra da busca que só tem dígitos e pontuação de CPF ("123", "123.456", "123.456.789-01").
 const CPF_TOKEN = /^[\d.-]+$/;
@@ -133,10 +129,12 @@ export class PatientsService {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const total = Number(countRows[0]?.total ?? 0);
 
-    return {
-      data: ids.flatMap((id) => byId.get(id) ?? []),
-      meta: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
-    };
+    return pageOf(
+      ids.flatMap((id) => byId.get(id) ?? []),
+      total,
+      page,
+      pageSize,
+    );
   }
 
   // Cada palavra da busca precisa casar (AND). Tudo parametrizado; os curingas do LIKE

@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { AppointmentStatus, Prisma } from '@prisma/client';
+import type { Appointment, AppointmentStatus, Prisma } from '@prisma/client';
+import { pageOf, type Page } from '../common/pagination/page.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateAppointmentDto } from './dto/create-appointment.dto.js';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto.js';
@@ -61,19 +62,37 @@ export class AppointmentsService {
     });
   }
 
-  findAll(tenantId: string, query: FindAppointmentsQueryDto) {
-    return this.prisma.appointment.findMany({
-      where: {
-        tenantId,
-        professionalId: query.professionalId,
-        patientId: query.patientId,
-        scheduledAt: {
-          gte: query.from ? new Date(query.from) : undefined,
-          lte: query.to ? new Date(query.to) : undefined,
-        },
-      },
-      orderBy: { scheduledAt: 'asc' },
-    });
+  // Ordem por horário com desempate por id: dois agendamentos no mesmo horário (profissionais
+  // diferentes) não podem trocar de lugar entre páginas, senão a paginação repete ou pula.
+  async findAll(tenantId: string, query: FindAppointmentsQueryDto): Promise<Page<Appointment>> {
+    const { page, pageSize } = query;
+    const from = query.from ? new Date(query.from) : undefined;
+    const to = query.to ? new Date(query.to) : undefined;
+    if (from && to && from > to) {
+      throw new BadRequestException('from deve ser anterior ou igual a to');
+    }
+
+    // Sobreposição com a janela [from, to]: termina depois de `from` e começa até `to`.
+    // (Antes só o início era considerado, e um atendimento em andamento sumia da janela.)
+    const where: Prisma.AppointmentWhereInput = {
+      tenantId,
+      professionalId: query.professionalId,
+      patientId: query.patientId,
+      status: query.status ? { in: query.status } : undefined,
+      endsAt: from ? { gt: from } : undefined,
+      scheduledAt: to ? { lte: to } : undefined,
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.appointment.findMany({
+        where,
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.appointment.count({ where }),
+    ]);
+    return pageOf(data, total, page, pageSize);
   }
 
   async findOne(tenantId: string, id: string) {
