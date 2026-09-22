@@ -86,6 +86,15 @@ Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/
 - **CPF único por tenant, inclusive entre removidos.** O CPF de um paciente removido continua reservado, para não duplicar cadastro/prontuário. Tentar cadastrar (ou trocar para) esse CPF devolve `409` com `removedPatientId`, para o cliente oferecer "restaurar".
 - **Restauração:** `GET /patients/removed` lista os removidos e `POST /patients/:id/restore` desfaz o soft delete (dados e anamnese voltam intactos). Ambos exigem `patients:write`.
 
+## Whitelabel / branding
+
+- **Configurar (admin da clínica, `tenant:manage`):** `PATCH /tenants/:id/branding` com `tradeName`, `logoUrl`, `primaryColor`, `secondaryColor`. Envio parcial; `null` limpa o campo. Cores `#RRGGBB`; `logoUrl` só `https`. `customDomain` (em `PATCH /tenants/:id` ou no signup) é validado como domínio e normalizado para minúsculas.
+- **Resolver a marca antes do login (público):** `GET /public/branding?host=<host do frontend>` → `{ name, tradeName, logoUrl, primaryColor, secondaryColor }`. O frontend chama com o `window.location.host` para tematizar a tela de login.
+  - Domínio próprio: casa por igualdade exata com `customDomain`.
+  - Subdomínio: `<sub>.<APP_BASE_DOMAIN>` (defina `APP_BASE_DOMAIN`, ex.: `bemtevi.com.br`); sem ele, um host sem ponto é tratado como o próprio subdomínio (dev: `?host=clinica-a`).
+  - Porta, maiúsculas e ponto final são ignorados. Clínica inexistente ou suspensa → `404`. Só campos de marca são expostos (nada de id, status ou configurações). Resposta com `Cache-Control: public, max-age=60`.
+- **Limitação conhecida:** o domínio próprio não passa por verificação de posse (DNS/TXT). Quem fizer signup pode registrar o `customDomain` de terceiros e passa a controlar a marca exibida nesse host. Antes de liberar domínio próprio em produção, exigir verificação. Upload de logo também não existe ainda (só a URL).
+
 ## Agenda
 
 **Duração do atendimento.** `POST /tenants/:tenantId/appointments` aceita dois modos:
@@ -122,5 +131,6 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 - `npm run test:e2e` — ponta a ponta, contra o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte. Setup compartilhado em `test/helpers/e2e.ts`.
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF único, anamnese, isolamento.
+  - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.

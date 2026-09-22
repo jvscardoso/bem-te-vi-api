@@ -1,5 +1,6 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsFQDN,
   IsInt,
   IsObject,
   IsOptional,
@@ -24,8 +25,11 @@ export class CreateTenantDto {
   })
   subdomain!: string;
 
+  // Domínio próprio da clínica (whitelabel). Minúsculo e sem espaços, pois a resolução
+  // por host (GET /public/branding) compara com igualdade exata.
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsFQDN()
   @MaxLength(255)
   customDomain?: string;
 

@@ -32,6 +32,7 @@ services:
       # Vem do .env (ou do ambiente); sem ele a API não sobe.
       JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-}
     ports:
       - '${PORT:-3000}:3000'
 
