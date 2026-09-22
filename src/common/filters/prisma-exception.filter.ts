@@ -10,6 +10,7 @@ const UNIQUE_MESSAGES: Record<string, string> = {
   roles_tenant_id_name_key: 'Já existe um papel com este nome',
   tenants_subdomain_key: 'Este subdomínio já está em uso',
   tenants_custom_domain_key: 'Este domínio já está em uso',
+  anamnesis_templates_tenant_id_name_key: 'Já existe um formulário de anamnese com este nome',
 };
 
 // Traduz erros conhecidos do Prisma em respostas HTTP corretas em vez de 500.

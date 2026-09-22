@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   cleanupTenants,
+  createAnamnesisTemplate,
   createPatient,
   createTestApp,
   createUser,
@@ -15,6 +16,7 @@ describe('Pacientes e anamnese (e2e)', () => {
   let ctx: TestApp;
   let a: TestTenant;
   let b: TestTenant;
+  let template: { id: string };
 
   const patientsUrl = (t: TestTenant) => `/tenants/${t.tenantId}/patients`;
 
@@ -22,6 +24,7 @@ describe('Pacientes e anamnese (e2e)', () => {
     ctx = await createTestApp();
     a = await signupTenant(ctx.http, 'pa');
     b = await signupTenant(ctx.http, 'pb');
+    template = await createAnamnesisTemplate(ctx.http, a);
   });
 
   afterAll(async () => {
@@ -283,7 +286,12 @@ describe('Pacientes e anamnese (e2e)', () => {
         cpf: '999.999.999-99',
       });
       const anamnesisUrl = `${patientsUrl(a)}/${patient.id}/anamnesis-records`;
-      await ctx.http().post(anamnesisUrl).set(a.auth).send({ answers: { queixa: 'x' } }).expect(201);
+      await ctx
+        .http()
+        .post(anamnesisUrl)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: { queixa: 'x' } })
+        .expect(201);
       await ctx.http().delete(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(200);
       await ctx.http().get(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(404);
 
@@ -382,7 +390,7 @@ describe('Pacientes e anamnese (e2e)', () => {
   });
 
   describe('anamnese', () => {
-    it('registra fichas com o autor e lista da mais recente para a mais antiga', async () => {
+    it('registra fichas com o autor e o formulário usado, lista da mais recente para a mais antiga', async () => {
       const patient = await createPatient(ctx.http, a);
       const url = `${patientsUrl(a)}/${patient.id}/anamnesis-records`;
 
@@ -390,16 +398,26 @@ describe('Pacientes e anamnese (e2e)', () => {
         .http()
         .post(url)
         .set(a.auth)
-        .send({ answers: { queixa: 'dor de cabeça', alergias: ['dipirona'], fumante: false } })
+        .send({
+          templateId: template.id,
+          answers: { queixa: 'dor de cabeça', alergias: ['dipirona'], fumante: false },
+        })
         .expect(201);
       expect(first.body).toMatchObject({
         tenantId: a.tenantId,
         patientId: patient.id,
+        templateId: template.id,
         filledByUserId: a.id,
         answers: { queixa: 'dor de cabeça', alergias: ['dipirona'], fumante: false },
+        template: { id: template.id },
       });
 
-      await ctx.http().post(url).set(a.auth).send({ answers: { queixa: 'retorno' } }).expect(201);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: { queixa: 'retorno' } })
+        .expect(201);
 
       const list = await ctx.http().get(url).set(a.auth).expect(200);
       expect((list.body as { answers: { queixa: string } }[]).map((r) => r.answers.queixa)).toEqual([
@@ -408,13 +426,56 @@ describe('Pacientes e anamnese (e2e)', () => {
       ]);
     });
 
-    it('exige answers como objeto', async () => {
+    it('exige templateId e answers (objeto)', async () => {
       const patient = await createPatient(ctx.http, a);
       const url = `${patientsUrl(a)}/${patient.id}/anamnesis-records`;
 
       await ctx.http().post(url).set(a.auth).send({}).expect(400);
-      await ctx.http().post(url).set(a.auth).send({ answers: 'texto' }).expect(400);
-      await ctx.http().post(url).set(a.auth).send({ answers: ['a', 'b'] }).expect(400);
+      await ctx.http().post(url).set(a.auth).send({ templateId: template.id }).expect(400);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: 'texto' })
+        .expect(400);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: ['a', 'b'] })
+        .expect(400);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: 'nao-uuid', answers: { queixa: 'x' } })
+        .expect(400);
+    });
+
+    it('recusa formulário inexistente ou de outro tenant (400) e respostas que não batem com os campos', async () => {
+      const patient = await createPatient(ctx.http, a);
+      const url = `${patientsUrl(a)}/${patient.id}/anamnesis-records`;
+      const foreignTemplate = await createAnamnesisTemplate(ctx.http, b);
+
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: randomUUID(), answers: { queixa: 'x' } })
+        .expect(400);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: foreignTemplate.id, answers: { queixa: 'x' } })
+        .expect(400);
+      // Campo que não existe no formulário.
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: { campo_fantasma: 1 } })
+        .expect(400);
     });
 
     it('não registra nem lista ficha de paciente inexistente, removido ou de outro tenant', async () => {
@@ -424,13 +485,23 @@ describe('Pacientes e anamnese (e2e)', () => {
 
       for (const id of [randomUUID(), removed.id]) {
         const url = `${patientsUrl(a)}/${id}/anamnesis-records`;
-        await ctx.http().post(url).set(a.auth).send({ answers: { x: 1 } }).expect(404);
+        await ctx
+          .http()
+          .post(url)
+          .set(a.auth)
+          .send({ templateId: template.id, answers: { queixa: 'x' } })
+          .expect(404);
         await ctx.http().get(url).set(a.auth).expect(404);
       }
 
       // Paciente do A acessado pela URL do B: 404, sem vazar nem gravar ficha.
       const crossUrl = `${patientsUrl(b)}/${foreign.id}/anamnesis-records`;
-      await ctx.http().post(crossUrl).set(b.auth).send({ answers: { x: 1 } }).expect(404);
+      await ctx
+        .http()
+        .post(crossUrl)
+        .set(b.auth)
+        .send({ templateId: template.id, answers: { queixa: 'x' } })
+        .expect(404);
       await ctx.http().get(crossUrl).set(b.auth).expect(404);
       expect(await ctx.prisma.anamnesisRecord.count({ where: { patientId: foreign.id } })).toBe(0);
     });
@@ -438,7 +509,12 @@ describe('Pacientes e anamnese (e2e)', () => {
     it('as fichas somem da leitura junto com o paciente removido, mas ficam no banco', async () => {
       const patient = await createPatient(ctx.http, a);
       const url = `${patientsUrl(a)}/${patient.id}/anamnesis-records`;
-      await ctx.http().post(url).set(a.auth).send({ answers: { x: 1 } }).expect(201);
+      await ctx
+        .http()
+        .post(url)
+        .set(a.auth)
+        .send({ templateId: template.id, answers: { queixa: 'x' } })
+        .expect(201);
 
       await ctx.http().delete(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(200);
 

@@ -11,6 +11,7 @@ const PERMISSIONS = [
   { key: 'users:manage', description: 'Gerenciar usuários do tenant' },
   { key: 'roles:manage', description: 'Gerenciar papéis e permissões' },
   { key: 'tenant:manage', description: 'Gerenciar dados e marca do tenant' },
+  { key: 'anamnesis_templates:manage', description: 'Criar/editar/apagar formulários de anamnese' },
 ];
 
 async function main() {

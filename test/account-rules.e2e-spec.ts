@@ -21,6 +21,7 @@ const ALL_KEYS = [
   'users:manage',
   'roles:manage',
   'tenant:manage',
+  'anamnesis_templates:manage',
 ];
 const MANAGEMENT = ['users:manage', 'roles:manage', 'tenant:manage'];
 

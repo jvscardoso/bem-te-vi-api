@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type Patient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePatientDto } from './dto/create-patient.dto.js';
@@ -6,6 +6,10 @@ import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto.js';
 import { pageOf, type Page } from '../common/pagination/page.js';
+import {
+  validateAnswers,
+  type AnamnesisFieldDefinition,
+} from '../anamnesis-templates/anamnesis-answers.validator.js';
 
 // Palavra da busca que só tem dígitos e pontuação de CPF ("123", "123.456", "123.456.789-01").
 const CPF_TOKEN = /^[\d.-]+$/;
@@ -168,13 +172,29 @@ export class PatientsService {
     dto: CreateAnamnesisRecordDto,
   ) {
     await this.findOne(tenantId, patientId);
+    // O FK do banco só garante que o template existe, não que é deste tenant nem que
+    // `answers` bate com os campos dele — as duas coisas checadas aqui, não no banco.
+    const template = await this.prisma.anamnesisTemplate.findFirst({
+      where: { id: dto.templateId, tenantId },
+      select: { fields: true },
+    });
+    if (!template) {
+      throw new BadRequestException('templateId inválido para este tenant');
+    }
+    const errors = validateAnswers(template.fields as unknown as AnamnesisFieldDefinition[], dto.answers);
+    if (errors.length > 0) {
+      throw new BadRequestException(errors);
+    }
+
     return this.prisma.anamnesisRecord.create({
       data: {
         tenantId,
         patientId,
+        templateId: dto.templateId,
         filledByUserId,
         answers: dto.answers as Prisma.InputJsonValue,
       },
+      include: { template: { select: { id: true, name: true } } },
     });
   }
 
@@ -183,6 +203,7 @@ export class PatientsService {
     return this.prisma.anamnesisRecord.findMany({
       where: { tenantId, patientId },
       orderBy: { createdAt: 'desc' },
+      include: { template: { select: { id: true, name: true } } },
     });
   }
 }

@@ -115,6 +115,33 @@ export async function createPatient(
   return res.body;
 }
 
+// Campos genéricos o bastante para servir aos testes que só precisam de um formulário
+// qualquer (não estão testando o próprio formulário) — texto opcional, multiselect e boolean.
+const DEFAULT_ANAMNESIS_FIELDS = [
+  { key: 'queixa', label: 'Queixa principal', type: 'textarea', required: false },
+  {
+    key: 'alergias',
+    label: 'Alergias',
+    type: 'multiselect',
+    required: false,
+    options: ['dipirona', 'penicilina', 'nenhuma'],
+  },
+  { key: 'fumante', label: 'Fumante?', type: 'boolean', required: false },
+];
+
+export async function createAnamnesisTemplate(
+  http: Http,
+  admin: TestTenant,
+  fields: Record<string, unknown>[] = DEFAULT_ANAMNESIS_FIELDS,
+): Promise<{ id: string; name: string; fields: unknown[] }> {
+  const res = await http()
+    .post(`/tenants/${admin.tenantId}/anamnesis-templates`)
+    .set(admin.auth)
+    .send({ name: `Ficha ${uniq()}`, fields })
+    .expect(201);
+  return res.body;
+}
+
 export async function permissionIds(prisma: PrismaService, keys: string[]): Promise<string[]> {
   const rows = await prisma.permission.findMany({ where: { key: { in: keys } } });
   return rows.map((row) => row.id);
@@ -128,6 +155,7 @@ export async function cleanupTenants(prisma: PrismaService, tenantIds: (string |
     return;
   }
   await prisma.anamnesisRecord.deleteMany({ where: { tenantId: { in: ids } } });
+  await prisma.anamnesisTemplate.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.appointment.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.patient.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.user.deleteMany({ where: { tenantId: { in: ids } } });

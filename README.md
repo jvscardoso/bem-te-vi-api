@@ -106,6 +106,35 @@ Resposta: `{ "data": [...pacientes], "meta": { "total", "page", "pageSize", "tot
 
 Implementação: os ids da página saem de SQL parametrizado (usa a extensão `unaccent`, criada pela migration `patient_search`; o usuário do banco precisa poder criá-la, o que é permitido a quem tem `CREATE` no banco por ser extensão *trusted*), e os registros vêm pelo Prisma. Sem índice de trigram por enquanto: cada busca varre os pacientes do tenant, o que basta para milhares de cadastros; se um tenant crescer muito, adicionar `pg_trgm`. **Limite:** uma palavra só com dígitos é sempre tratada como CPF, então um nome cadastrado com número isolado não é achado por esse número.
 
+### Anamnese: formulário configurável por tenant
+
+Cada clínica define os próprios campos da ficha (chave, rótulo, tipo, obrigatório, opções) em `AnamnesisTemplate`, em vez de um JSON livre sem forma nenhuma. `POST` num paciente é validado contra o `templateId` informado.
+
+**Gerenciar formulários** — `/tenants/:tenantId/anamnesis-templates` (`anamnesis_templates:manage` para criar/editar/apagar; `patients:read` basta para listar/ler, já que quem preenche anamnese só precisa saber a forma do formulário, não editá-lo):
+
+```json
+{
+  "name": "Ficha padrão",
+  "fields": [
+    { "key": "queixa_principal", "label": "Queixa principal", "type": "textarea", "required": true },
+    { "key": "idade", "label": "Idade", "type": "number", "required": false },
+    { "key": "fumante", "label": "Fumante?", "type": "boolean", "required": false },
+    { "key": "inicio_sintomas", "label": "Início dos sintomas", "type": "date", "required": false },
+    { "key": "tipo_sanguineo", "label": "Tipo sanguíneo", "type": "select", "required": false, "options": ["A", "B", "AB", "O"] },
+    { "key": "alergias", "label": "Alergias", "type": "multiselect", "required": false, "options": ["dipirona", "penicilina"] }
+  ]
+}
+```
+
+- `key`: identificador (snake_case: `^[a-z][a-z0-9_]*$`), único dentro do formulário — vira a chave em `answers`.
+- `type`: `text`, `textarea`, `number`, `boolean`, `date`, `select`, `multiselect`. `select`/`multiselect` exigem `options` (≥ 1 item); os demais tipos não podem ter `options`.
+- `DELETE` apaga o formulário; se algum paciente já tem anamnese registrada com ele, dá `409` (FK `Restrict`), não `500` — apagar perderia o contexto de fichas antigas.
+- Editar os campos de um formulário já usado é permitido (sem versionamento): fichas antigas mantêm o que foi salvo; a validação nova só vale para os próximos registros.
+
+**Preencher (`POST /tenants/:tenantId/patients/:id/anamnesis-records`)** passa a exigir `{ templateId, answers }`. `answers` é validado contra os campos do template indicado — tipo errado, campo obrigatório ausente ou chave que não existe no formulário dão `400` com a lista de problemas (não só o primeiro). A resposta inclui `template: { id, name }` para o cliente não precisar de uma segunda chamada para saber o que renderizar.
+
+**Sem migração automática de dados livres:** como o MVP anterior guardava `answers` sem forma nenhuma, esta mudança é incompatível com fichas antigas hipotéticas fora daqui (não havia nenhuma em produção até este ponto). Times que já tiverem dados reais no formato antigo precisam migrar `answers` para um `AnamnesisTemplate` antes de atualizar.
+
 ## Whitelabel / branding
 
 - **Configurar (admin da clínica, `tenant:manage`):** `PATCH /tenants/:id/branding` com `tradeName`, `logoUrl`, `primaryColor`, `secondaryColor`. Envio parcial; `null` limpa o campo. Cores `#RRGGBB`; `logoUrl` só `https`. `customDomain` (em `PATCH /tenants/:id` ou no signup) é validado como domínio e normalizado para minúsculas.
@@ -213,7 +242,8 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
 - `npm run test:e2e` — ponta a ponta, contra o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte. Setup compartilhado em `test/helpers/e2e.ts`.
   - `retry: 2` no config de e2e (`vitest.config.e2e.ts`): esses testes fazem muitas requisições reais contra o Postgres do Docker, e volume alto ocasionalmente esbarra em instabilidade de rede do ambiente (`ECONNRESET`, mais comum no Docker Desktop do Windows), não em bug de lógica — uma asserção errada continua falhando na repetição. A causa raiz mais comum (pool do Prisma sem TCP keepalive) já foi corrigida em `PrismaService`; o retry cobre o que sobra dessa classe de flake, mas só ajuda dentro de um `it()` — uma falha no `beforeAll` (setup do arquivo) derruba o arquivo inteiro sem repetir. Por isso o CI também reexecuta o comando `test:e2e` uma vez se ele falhar (ver abaixo).
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
-  - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese, isolamento.
+  - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese (com template), isolamento.
+  - `anamnesis-templates.e2e-spec.ts` — CRUD de formulários, validação da forma dos campos (tipos, select/multiselect exigindo opções, key única/padrão), 409 ao apagar em uso, permissões, e a validação de `answers` na integração com pacientes.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.
   - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
   - `domain-verification.e2e-spec.ts` — desafio TXT, verificação (certo/errado/múltiplos registros/DNS fora do ar), troca/remoção de domínio, permissões e isolamento. Usa um `DnsTxtResolver` falso injetado via `createTestApp({ dnsTxtResolver })` (não dá para provar o caminho feliz com DNS real num teste automatizado).

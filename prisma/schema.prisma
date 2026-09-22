@@ -50,6 +50,7 @@ model Tenant {
   roles         Role[]
   patients      Patient[]
   appointments  Appointment[]
+  anamnesisTemplates AnamnesisTemplate[]
 
   @@map("tenants")
 }
@@ -171,22 +172,45 @@ model Patient {
   @@map("patients")
 }
 
-// Ficha de anamnese preenchida para um paciente. MVP: resposta livre em jsonb;
-// um formulário configurável por tenant (AnamnesisTemplate) fica para depois.
+// Formulário de anamnese configurável por tenant: cada clínica define seus próprios campos
+// (chave, rótulo, tipo, obrigatório, opções) em vez de um JSON livre sem forma nenhuma.
+// Forma de `fields`: AnamnesisFieldDefinition[] (ver anamnesis-templates/anamnesis-answers.validator.ts).
+model AnamnesisTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String   @db.VarChar(100)
+  fields    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  records AnamnesisRecord[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("anamnesis_templates")
+}
+
+// Ficha de anamnese preenchida para um paciente, segundo um AnamnesisTemplate do tenant.
+// `answers` é validado contra os campos do template no momento do registro (não há garantia
+// no banco de que continua batendo se o template for editado depois — ver o serviço).
 model AnamnesisRecord {
   id            String   @id @default(uuid())
   tenantId      String   @map("tenant_id")
   patientId     String   @map("patient_id")
+  templateId    String   @map("template_id")
   filledByUserId String  @map("filled_by_user_id")
   answers       Json
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  filledBy      User     @relation(fields: [filledByUserId], references: [id], onDelete: Restrict)
+  patient       Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  template      AnamnesisTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  filledBy      User              @relation(fields: [filledByUserId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
   @@index([patientId])
+  @@index([templateId])
   @@map("anamnesis_records")
 }
 
