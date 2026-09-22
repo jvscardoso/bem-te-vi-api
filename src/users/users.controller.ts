@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.dto.js';
+import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
@@ -22,8 +23,8 @@ export class UsersController {
   }
 
   @Get()
-  findAll(@Param('tenantId') tenantId: string) {
-    return this.usersService.findAll(tenantId);
+  findAll(@Param('tenantId') tenantId: string, @Query() query: ListUsersQueryDto) {
+    return this.usersService.findAll(tenantId, query);
   }
 
   // O próprio profissional ajusta a duração dos seus atendimentos sem precisar de

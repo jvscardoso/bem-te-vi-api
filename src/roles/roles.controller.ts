@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { RolesService } from './roles.service.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
 import { UpdateRoleDto } from './dto/update-role.dto.js';
+import { ListRolesQueryDto } from './dto/list-roles-query.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
@@ -21,8 +22,8 @@ export class RolesController {
   }
 
   @Get()
-  findAll(@Param('tenantId') tenantId: string) {
-    return this.rolesService.findAll(tenantId);
+  findAll(@Param('tenantId') tenantId: string, @Query() query: ListRolesQueryDto) {
+    return this.rolesService.findAll(tenantId, query);
   }
 
   @Get(':id')

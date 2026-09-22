@@ -4,6 +4,8 @@ import { AccessPolicyService, type Db } from '../access/access-policy.service.js
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
 import { UpdateRoleDto } from './dto/update-role.dto.js';
+import { ListRolesQueryDto } from './dto/list-roles-query.dto.js';
+import { pageOf } from '../common/pagination/page.js';
 
 @Injectable()
 export class RolesService {
@@ -29,11 +31,20 @@ export class RolesService {
     });
   }
 
-  findAll(tenantId: string) {
-    return this.prisma.role.findMany({
-      where: { tenantId },
-      include: { permissions: { include: { permission: true } } },
-    });
+  // Ordem por nome com desempate por id, para as páginas não repetirem nem pularem papéis.
+  async findAll(tenantId: string, { page, pageSize }: ListRolesQueryDto) {
+    const where = { tenantId };
+    const [data, total] = await Promise.all([
+      this.prisma.role.findMany({
+        where,
+        include: { permissions: { include: { permission: true } } },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.role.count({ where }),
+    ]);
+    return pageOf(data, total, page, pageSize);
   }
 
   async findOne(tenantId: string, id: string) {

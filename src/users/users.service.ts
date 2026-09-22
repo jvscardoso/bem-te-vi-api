@@ -11,6 +11,8 @@ import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.dto.js';
+import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
+import { pageOf } from '../common/pagination/page.js';
 
 const SALT_ROUNDS = 12;
 
@@ -50,11 +52,20 @@ export class UsersService {
     });
   }
 
-  findAll(tenantId: string) {
-    return this.prisma.user.findMany({
-      where: { tenantId },
-      omit: { passwordHash: true },
-    });
+  // Ordem por nome com desempate por id, para as páginas não repetirem nem pularem usuários.
+  async findAll(tenantId: string, { page, pageSize }: ListUsersQueryDto) {
+    const where = { tenantId };
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        omit: { passwordHash: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return pageOf(data, total, page, pageSize);
   }
 
   async findOne(tenantId: string, id: string) {
