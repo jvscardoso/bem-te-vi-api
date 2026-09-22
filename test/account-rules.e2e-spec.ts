@@ -13,16 +13,12 @@ import {
   type TestUser,
 } from './helpers/e2e.js';
 
-const ALL_KEYS = [
-  'patients:read',
-  'patients:write',
-  'appointments:read',
-  'appointments:write',
-  'users:manage',
-  'roles:manage',
-  'tenant:manage',
-  'anamnesis_templates:manage',
-];
+// Lido do catálogo real no beforeAll (não hardcoded): toda vez que uma permissão nova é
+// adicionada ao catálogo, esta lista já reflete automaticamente, sem precisar editar o teste
+// (já aconteceu duas vezes — anamnesis_templates e depois billing — de esquecer de atualizar
+// uma lista fixa aqui). `platform:*` fica de fora de propósito: nunca é concedida ao papel
+// Admin de um signup normal (ver TenantsService.create), então não conta como "tudo".
+let ALL_KEYS: string[];
 const MANAGEMENT = ['users:manage', 'roles:manage', 'tenant:manage'];
 
 // Roda contra o Postgres do .env (docker compose up -d + migrate + seed).
@@ -65,6 +61,8 @@ describe('Regras de conta (e2e)', () => {
 
   beforeAll(async () => {
     ctx = await createTestApp();
+    const permissions = await ctx.prisma.permission.findMany({ select: { key: true } });
+    ALL_KEYS = permissions.map((p) => p.key).filter((key) => !key.startsWith('platform:'));
   });
 
   afterAll(async () => {

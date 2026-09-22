@@ -102,6 +102,8 @@ model User {
   role          Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
   anamnesisRecords AnamnesisRecord[]
   appointments  Appointment[] @relation("AppointmentProfessional")
+  chargesCreated Charge[]
+  paymentsRecorded Payment[]
 
   @@index([tenantId])
   @@map("users")
@@ -170,6 +172,7 @@ model Patient {
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   anamnesisRecords  AnamnesisRecord[]
   appointments      Appointment[]
+  charges           Charge[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
@@ -245,6 +248,7 @@ model Appointment {
   tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   professional User    @relation("AppointmentProfessional", fields: [professionalId], references: [id], onDelete: Restrict)
+  charges      Charge[]
 
   // (tenantId, scheduledAt) serve à listagem paginada (filtra o tenant e ordena/filtra por horário);
   // substitui o índice só por tenantId, que ele já cobre.
@@ -252,4 +256,81 @@ model Appointment {
   @@index([professionalId, scheduledAt])
   @@index([patientId])
   @@map("appointments")
+}
+
+// =============================================================================
+// 04. FINANCEIRO
+// =============================================================================
+//
+// Módulo nativo de cobrança e pagamento. Emissão de nota fiscal (NFS-e) fica fora de
+// propósito por enquanto: é serviço municipal (não federal/estadual), cada um dos +5.000
+// municípios brasileiros pode ter seu próprio webservice/regra de ISS, e por isso toda
+// aplicação séria integra com um provedor certificado (Focus NFe, eNotas, PlugNotas, etc.)
+// em vez de falar direto com a prefeitura — vira uma peça plugável quando isso entrar.
+
+enum ChargeStatus {
+  pending
+  paid
+  cancelled
+}
+
+enum PaymentMethod {
+  cash
+  pix
+  credit_card
+  debit_card
+  bank_transfer
+  other
+}
+
+// Cobrança de um paciente por um serviço prestado — normalmente ligada a um agendamento,
+// mas não obrigatoriamente (cobrança avulsa). "Atrasada" não é um status próprio: é
+// `pending` com `dueDate` no passado, calculado na leitura (ver BillingService), não
+// armazenado — evita precisar de um job agendado só para marcar isso.
+model Charge {
+  id              String       @id @default(uuid())
+  tenantId        String       @map("tenant_id")
+  patientId       String       @map("patient_id")
+  appointmentId   String?      @map("appointment_id")
+  description     String       @db.VarChar(200)
+  // Em centavos (R$ 150,00 = 15000): evita ponto flutuante e Decimal na camada de aplicação —
+  // mesma convenção usada por APIs de pagamento (ex.: Stripe).
+  amountCents     Int          @map("amount_cents")
+  dueDate         DateTime     @map("due_date") @db.Date
+  status          ChargeStatus @default(pending)
+  createdByUserId String       @map("created_by_user_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  patient     Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  createdBy   User         @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  payments    Payment[]
+
+  @@index([tenantId])
+  @@index([patientId])
+  @@index([tenantId, status, dueDate])
+  @@map("charges")
+}
+
+// Pagamento (total ou parcial) registrado contra uma cobrança. A soma dos pagamentos de uma
+// cobrança nunca passa do valor dela (checado em transação com advisory lock por cobrança,
+// mesmo padrão do lock de sobreposição de agenda); quando bate, a cobrança vira `paid` sozinha.
+model Payment {
+  id               String        @id @default(uuid())
+  tenantId         String        @map("tenant_id")
+  chargeId         String        @map("charge_id")
+  amountCents      Int           @map("amount_cents")
+  method           PaymentMethod
+  paidAt           DateTime      @default(now()) @map("paid_at")
+  notes            String?
+  recordedByUserId String        @map("recorded_by_user_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  charge     Charge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  recordedBy User   @relation(fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([chargeId])
+  @@map("payments")
 }

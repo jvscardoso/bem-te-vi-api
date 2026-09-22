@@ -168,7 +168,8 @@ export async function permissionIds(prisma: PrismaService, keys: string[]): Prom
 }
 
 // Ordem importa: vários FKs são Restrict (anamnese -> usuário, agendamento -> profissional,
-// usuário -> role) e bloqueariam a cascata direta a partir do tenant.
+// cobrança/pagamento -> usuário, usuário -> role) e bloqueariam a cascata direta a partir do
+// tenant. `charge.deleteMany` já leva os `payment`s junto (Payment -> Charge é Cascade).
 export async function cleanupTenants(prisma: PrismaService, tenantIds: (string | undefined)[]) {
   const ids = tenantIds.filter((id): id is string => Boolean(id));
   if (ids.length === 0) {
@@ -176,6 +177,7 @@ export async function cleanupTenants(prisma: PrismaService, tenantIds: (string |
   }
   await prisma.anamnesisRecord.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.anamnesisTemplate.deleteMany({ where: { tenantId: { in: ids } } });
+  await prisma.charge.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.appointment.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.patient.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.user.deleteMany({ where: { tenantId: { in: ids } } });

@@ -236,6 +236,22 @@ PLATFORM_ADMIN_EMAIL=voce@empresa.com PLATFORM_ADMIN_PASSWORD="senha-forte" npm 
 
 Cria a clínica-plataforma (`Tenant.isPlatform = true`, invisível nas listagens normais e neste backoffice), o papel com `platform:manage` e o usuário — tudo idempotente (rodar de novo não duplica nada nem reseta senha de quem já existe). Depende do catálogo de permissões já ter sido semeado (`npx prisma db seed`). A própria clínica-plataforma não pode ser suspensa por `PATCH /platform/tenants/:id/status` (dá `404`, como se não existisse ali).
 
+## Financeiro (`src/billing`)
+
+Cobrança e pagamento nativos — nada disto depende de serviço externo. **Emissão de nota fiscal (NFS-e) fica fora de escopo por enquanto**, e isso não é um corte arbitrário: NFS-e é serviço **municipal** (não federal/estadual), o Brasil tem mais de 5.000 municípios e boa parte roda sistema próprio de ISS; por isso toda aplicação séria — grande ou pequena — integra com um provedor certificado (Focus NFe, eNotas, PlugNotas, Nuvem Fiscal, etc.) em vez de falar direto com a prefeitura. Quando entrar, a emissão vira uma peça plugável (mesmo espírito do `DnsTxtResolver` da verificação de domínio) por trás de um provedor a escolher.
+
+**Cobrança (`Charge`)** — `/tenants/:tenantId/charges` (`billing:write` para criar/editar/cancelar/registrar pagamento; `billing:read` para o resto):
+- Ligada a um paciente e, opcionalmente, a um agendamento **do mesmo paciente**.
+- `amountCents`: valor em centavos (R$ 150,00 = `15000`) — evita ponto flutuante e `Decimal` na camada de aplicação, mesma convenção de APIs de pagamento (ex.: Stripe).
+- `status`: `pending` → `paid` (só como consequência de pagamento suficiente, nunca por `PATCH` direto) ou `pending` → `cancelled` (`DELETE`, mesma convenção da agenda: cancela, não apaga). `paid` e `cancelled` são finais.
+- **"Atrasada" não é status, é calculado:** `isOverdue` na resposta e o filtro `status=overdue` (mutuamente exclusivo com `status=pending` — uma cobrança pendente cai em exatamente um dos dois) comparam `dueDate` com hoje, sem precisar de job agendado.
+- Uma cobrança com **qualquer** pagamento registrado (mesmo parcial) não pode mais ser editada nem cancelada — só ler.
+- Listagem paginada com filtros `patientId`, `status` (`pending`/`overdue`/`paid`/`cancelled`) e `from`/`to` (janela de vencimento).
+
+**Pagamento (`Payment`)** — `POST /tenants/:tenantId/charges/:id/payments`: parcial ou total, soma nunca passa do valor da cobrança (rejeitado com o saldo devedor exato na mensagem). Ao completar o valor, a cobrança vira `paid` sozinha. Concorrência tratada com transação + advisory lock por cobrança — mesmo padrão (e mesmo motivo) do lock de sobreposição de horário na agenda: sem ele, pagamentos simultâneos poderiam somar mais que o valor devido.
+
+**Resumo (`GET /tenants/:tenantId/billing/summary`)**: totais de pendente, atrasado e cancelado (estado atual) e pago no período (`from`/`to`, por data do pagamento — pendente/atrasado não fazem sentido "num período", só o estado atual).
+
 ## CI (`.github/workflows/ci.yml`)
 
 Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últimos só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
@@ -273,6 +289,7 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
   - `users-roles-pagination.e2e-spec.ts` — paginação de usuários e papéis: páginas sem repetir/pular, ordenação por nome com desempate por id (usuários; papéis não têm nome duplicado por causa da unique), total conforme o tenant, limites e validação.
   - `platform.e2e-spec.ts` — backoffice: acesso (401/403), listagem (contagens, exclusão da própria clínica-plataforma), busca por nome/subdomínio/domínio próprio (acentos, curingas, SQL como texto), suspender/reativar, e o teste crítico de que o signup público nunca ganha `platform:manage` (comprovado removendo a exclusão de propósito: derruba 2 testes).
+  - `billing.e2e-spec.ts` — cobrança e pagamento: CRUD, `overdue` calculado (mutuamente exclusivo com `pending`), edição/cancelamento bloqueados após qualquer pagamento, pagamento parcial/total/excedente, resumo financeiro, isolamento e permissões, e **concorrência** (pagamentos simultâneos provam o advisory lock por cobrança; sem ele, os testes de corrida somam mais que o valor devido — comprovado removendo o lock: uma cobrança de R$100 chega a receber R$160 em pagamentos simultâneos).
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese (com template), isolamento.
   - `anamnesis-templates.e2e-spec.ts` — CRUD de formulários, validação da forma dos campos (tipos, select/multiselect exigindo opções, key única/padrão), 409 ao apagar em uso, permissões, e a validação de `answers` na integração com pacientes.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.

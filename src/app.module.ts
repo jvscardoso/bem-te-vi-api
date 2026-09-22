@@ -13,6 +13,7 @@ import { PatientsModule } from './patients/patients.module.js';
 import { AppointmentsModule } from './appointments/appointments.module.js';
 import { AnamnesisTemplatesModule } from './anamnesis-templates/anamnesis-templates.module.js';
 import { PlatformModule } from './platform/platform.module.js';
+import { BillingModule } from './billing/billing.module.js';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard.js';
 import { TenantAccessGuard } from './auth/guards/tenant-access.guard.js';
 import { PermissionsGuard } from './auth/guards/permissions.guard.js';
@@ -32,6 +33,7 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.
     AppointmentsModule,
     AnamnesisTemplatesModule,
     PlatformModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [
