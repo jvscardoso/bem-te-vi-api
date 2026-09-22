@@ -1,9 +1,18 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma, type Patient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
+import { ListPatientsQueryDto } from './dto/list-patients-query.dto.js';
+
+export interface Page<T> {
+  data: T[];
+  meta: { total: number; page: number; pageSize: number; totalPages: number };
+}
+
+// Palavra da busca que só tem dígitos e pontuação de CPF ("123", "123.456", "123.456.789-01").
+const CPF_TOKEN = /^[\d.-]+$/;
 
 @Injectable()
 export class PatientsService {
@@ -21,18 +30,12 @@ export class PatientsService {
     });
   }
 
-  findAll(tenantId: string) {
-    return this.prisma.patient.findMany({
-      where: { tenantId, deletedAt: null },
-      orderBy: { fullName: 'asc' },
-    });
+  findAll(tenantId: string, query: ListPatientsQueryDto) {
+    return this.paginate(tenantId, query, false);
   }
 
-  findRemoved(tenantId: string) {
-    return this.prisma.patient.findMany({
-      where: { tenantId, deletedAt: { not: null } },
-      orderBy: { deletedAt: 'desc' },
-    });
+  findRemoved(tenantId: string, query: ListPatientsQueryDto) {
+    return this.paginate(tenantId, query, true);
   }
 
   async findOne(tenantId: string, id: string) {
@@ -100,6 +103,64 @@ export class PatientsService {
       });
     }
     throw new ConflictException('Já existe um paciente com este CPF');
+  }
+
+  // Ordem estável (desempate por id) para a paginação não repetir nem pular registros.
+  // SQL cru só para achar os ids da página: o Prisma não expressa unaccent/ILIKE por palavra.
+  // Os registros vêm depois pelo Prisma, então a forma da resposta é a de sempre.
+  private async paginate(
+    tenantId: string,
+    { q, page, pageSize }: ListPatientsQueryDto,
+    removed: boolean,
+  ): Promise<Page<Patient>> {
+    const where = this.searchCondition(tenantId, q, removed);
+    const order = removed
+      ? Prisma.sql`deleted_at DESC, id ASC`
+      : Prisma.sql`full_name ASC, id ASC`;
+
+    const [idRows, countRows] = await Promise.all([
+      this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM patients WHERE ${where}
+        ORDER BY ${order} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+      this.prisma.$queryRaw<{ total: bigint }[]>`
+        SELECT COUNT(*) AS total FROM patients WHERE ${where}`,
+    ]);
+
+    const ids = idRows.map((row) => row.id);
+    const rows = ids.length
+      ? await this.prisma.patient.findMany({ where: { id: { in: ids }, tenantId } })
+      : [];
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const total = Number(countRows[0]?.total ?? 0);
+
+    return {
+      data: ids.flatMap((id) => byId.get(id) ?? []),
+      meta: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
+    };
+  }
+
+  // Cada palavra da busca precisa casar (AND). Tudo parametrizado; os curingas do LIKE
+  // digitados pelo usuário são escapados para valerem como texto literal.
+  private searchCondition(tenantId: string, q: string | undefined, removed: boolean) {
+    const conditions = [
+      Prisma.sql`tenant_id = ${tenantId}`,
+      removed ? Prisma.sql`deleted_at IS NOT NULL` : Prisma.sql`deleted_at IS NULL`,
+    ];
+
+    for (const token of (q ?? '').split(/\s+/).filter(Boolean)) {
+      if (CPF_TOKEN.test(token)) {
+        // CPF é guardado só com dígitos, então "123.456" e "123456" são a mesma busca.
+        const digits = token.replace(/\D/g, '');
+        if (digits) {
+          conditions.push(Prisma.sql`cpf LIKE ${`%${digits}%`}`);
+        }
+      } else {
+        // \ é o escape padrão do LIKE no Postgres: "\%" e "\_" viram % e _ literais.
+        const pattern = `%${token.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+        conditions.push(Prisma.sql`unaccent(full_name) ILIKE unaccent(${pattern})`);
+      }
+    }
+    return Prisma.join(conditions, ' AND ');
   }
 
   async addAnamnesisRecord(

@@ -145,6 +145,7 @@ model Patient {
   id          String    @id @default(uuid())
   tenantId    String    @map("tenant_id")
   fullName    String    @map("full_name") @db.VarChar(150)
+  // Só dígitos (11): normalizado na entrada. Busca por CPF e a unique dependem disso.
   cpf         String?   @db.VarChar(14)
   birthDate   DateTime? @map("birth_date") @db.Date
   phone       String?   @db.VarChar(20)

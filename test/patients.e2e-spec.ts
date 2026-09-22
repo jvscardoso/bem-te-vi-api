@@ -49,7 +49,7 @@ describe('Pacientes e anamnese (e2e)', () => {
       expect(res.body).toMatchObject({
         tenantId: a.tenantId,
         fullName: 'Maria da Silva',
-        cpf: '111.111.111-11',
+        cpf: '11111111111',
         address: { rua: 'Rua A', numero: 10, cidade: 'São Paulo' },
         deletedAt: null,
       });
@@ -60,13 +60,12 @@ describe('Pacientes e anamnese (e2e)', () => {
     });
 
     it('lista em ordem alfabética', async () => {
-      const zeca = await createPatient(ctx.http, a, { fullName: 'Zzz Zeca' });
-      const ana = await createPatient(ctx.http, a, { fullName: 'Aaa Ana' });
+      const tag = `ordem${Date.now().toString(36)}`;
+      const zeca = await createPatient(ctx.http, a, { fullName: `${tag} Zeca` });
+      const ana = await createPatient(ctx.http, a, { fullName: `${tag} Ana` });
 
-      const res = await ctx.http().get(patientsUrl(a)).set(a.auth).expect(200);
-      const ids = (res.body as { id: string }[]).map((p) => p.id);
-      expect(ids.indexOf(ana.id)).toBeGreaterThanOrEqual(0);
-      expect(ids.indexOf(ana.id)).toBeLessThan(ids.indexOf(zeca.id));
+      const res = await ctx.http().get(patientsUrl(a)).query({ q: tag }).set(a.auth).expect(200);
+      expect((res.body.data as { id: string }[]).map((p) => p.id)).toEqual([ana.id, zeca.id]);
     });
 
     it('atualiza parcialmente e preserva o resto', async () => {
@@ -106,8 +105,13 @@ describe('Pacientes e anamnese (e2e)', () => {
       await ctx.http().delete(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(200);
 
       await ctx.http().get(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(404);
-      const list = await ctx.http().get(patientsUrl(a)).set(a.auth).expect(200);
-      expect((list.body as { id: string }[]).some((p) => p.id === patient.id)).toBe(false);
+      const list = await ctx
+        .http()
+        .get(patientsUrl(a))
+        .query({ q: patient.fullName })
+        .set(a.auth)
+        .expect(200);
+      expect(list.body.data).toEqual([]);
 
       const row = await ctx.prisma.patient.findUniqueOrThrow({ where: { id: patient.id } });
       expect(row.deletedAt).not.toBeNull();
@@ -162,6 +166,60 @@ describe('Pacientes e anamnese (e2e)', () => {
       await createPatient(ctx.http, a);
     });
 
+    it('guarda o CPF só com dígitos, com ou sem pontuação na entrada', async () => {
+      const punctuated = await ctx
+        .http()
+        .post(patientsUrl(a))
+        .set(a.auth)
+        .send({ fullName: 'Com Pontos', cpf: '901.234.567-80' })
+        .expect(201);
+      const plain = await ctx
+        .http()
+        .post(patientsUrl(a))
+        .set(a.auth)
+        .send({ fullName: 'Sem Pontos', cpf: '90123456781' })
+        .expect(201);
+
+      expect(punctuated.body.cpf).toBe('90123456780');
+      expect(plain.body.cpf).toBe('90123456781');
+    });
+
+    it('o mesmo CPF em formatos diferentes é o mesmo CPF (409)', async () => {
+      await createPatient(ctx.http, a, { cpf: '912.345.678-90' });
+
+      await ctx.http().post(patientsUrl(a)).set(a.auth).send({ fullName: 'Dup', cpf: '91234567890' }).expect(409);
+      await ctx.http().post(patientsUrl(a)).set(a.auth).send({ fullName: 'Dup', cpf: ' 912 345 678 90 ' }).expect(409);
+    });
+
+    it.each(['123', '1234567890', '123456789012', 'abcdefghijk', '', '111.111.111-1'])(
+      'recusa CPF que não tem 11 dígitos: %j',
+      async (cpf) => {
+        await ctx.http().post(patientsUrl(a)).set(a.auth).send({ fullName: 'X', cpf }).expect(400);
+      },
+    );
+
+    it('normaliza ao editar e null limpa o CPF (liberando-o para outro)', async () => {
+      const patient = await createPatient(ctx.http, a, { cpf: '923.456.789-01' });
+
+      const renamed = await ctx
+        .http()
+        .patch(`${patientsUrl(a)}/${patient.id}`)
+        .set(a.auth)
+        .send({ cpf: '923.456.789-02' })
+        .expect(200);
+      expect(renamed.body.cpf).toBe('92345678902');
+
+      const cleared = await ctx
+        .http()
+        .patch(`${patientsUrl(a)}/${patient.id}`)
+        .set(a.auth)
+        .send({ cpf: null })
+        .expect(200);
+      expect(cleared.body.cpf).toBeNull();
+
+      await createPatient(ctx.http, a, { cpf: '923.456.789-02' });
+    });
+
     it('CPF de paciente removido continua reservado: 409 apontando o paciente a restaurar', async () => {
       const patient = await createPatient(ctx.http, a, { cpf: '666.666.666-66' });
       await ctx.http().delete(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(200);
@@ -205,18 +263,18 @@ describe('Pacientes e anamnese (e2e)', () => {
     const removedUrl = (t: TestTenant) => `${patientsUrl(t)}/removed`;
 
     it('lista só os removidos, do mais recente para o mais antigo', async () => {
-      const first = await createPatient(ctx.http, a);
-      const second = await createPatient(ctx.http, a);
-      const active = await createPatient(ctx.http, a);
+      const tag = `rem${Date.now().toString(36)}`;
+      const first = await createPatient(ctx.http, a, { fullName: `${tag} Primeiro` });
+      const second = await createPatient(ctx.http, a, { fullName: `${tag} Segundo` });
+      const active = await createPatient(ctx.http, a, { fullName: `${tag} Ativo` });
       await ctx.http().delete(`${patientsUrl(a)}/${first.id}`).set(a.auth).expect(200);
       await ctx.http().delete(`${patientsUrl(a)}/${second.id}`).set(a.auth).expect(200);
 
-      const res = await ctx.http().get(removedUrl(a)).set(a.auth).expect(200);
-      const ids = (res.body as { id: string }[]).map((p) => p.id);
+      const res = await ctx.http().get(removedUrl(a)).query({ q: tag }).set(a.auth).expect(200);
 
-      expect(ids).toContain(first.id);
-      expect(ids).not.toContain(active.id);
-      expect(ids.indexOf(second.id)).toBeLessThan(ids.indexOf(first.id));
+      // Só os removidos, o mais recentemente removido primeiro.
+      expect((res.body.data as { id: string }[]).map((p) => p.id)).toEqual([second.id, first.id]);
+      expect(res.body.data.some((p: { id: string }) => p.id === active.id)).toBe(false);
     });
 
     it('restaura o paciente com dados e anamnese intactos, e o CPF continua dele', async () => {
@@ -237,10 +295,10 @@ describe('Pacientes e anamnese (e2e)', () => {
       expect(restored.body).toMatchObject({ id: patient.id, fullName: 'Volta Ao Cadastro', deletedAt: null });
 
       await ctx.http().get(`${patientsUrl(a)}/${patient.id}`).set(a.auth).expect(200);
-      const list = await ctx.http().get(patientsUrl(a)).set(a.auth).expect(200);
-      expect((list.body as { id: string }[]).some((p) => p.id === patient.id)).toBe(true);
-      const removed = await ctx.http().get(removedUrl(a)).set(a.auth).expect(200);
-      expect((removed.body as { id: string }[]).some((p) => p.id === patient.id)).toBe(false);
+      const list = await ctx.http().get(patientsUrl(a)).query({ q: 'Volta Ao Cadastro' }).set(a.auth).expect(200);
+      expect((list.body.data as { id: string }[]).map((p) => p.id)).toEqual([patient.id]);
+      const removed = await ctx.http().get(removedUrl(a)).query({ q: 'Volta Ao Cadastro' }).set(a.auth).expect(200);
+      expect(removed.body.data).toEqual([]);
 
       const records = await ctx.http().get(anamnesisUrl).set(a.auth).expect(200);
       expect(records.body).toHaveLength(1);
@@ -272,7 +330,7 @@ describe('Pacientes e anamnese (e2e)', () => {
       expect(row.deletedAt).not.toBeNull();
 
       const bList = await ctx.http().get(removedUrl(b)).set(b.auth).expect(200);
-      expect((bList.body as { id: string }[]).some((p) => p.id === removedOfA.id)).toBe(false);
+      expect((bList.body.data as { id: string }[]).some((p) => p.id === removedOfA.id)).toBe(false);
     });
 
     it('exige patients:write (quem só lê não vê removidos nem restaura)', async () => {
@@ -319,7 +377,7 @@ describe('Pacientes e anamnese (e2e)', () => {
     it('a listagem de um tenant nunca traz pacientes de outro', async () => {
       const patient = await createPatient(ctx.http, a);
       const res = await ctx.http().get(patientsUrl(b)).set(b.auth).expect(200);
-      expect((res.body as { id: string }[]).some((p) => p.id === patient.id)).toBe(false);
+      expect((res.body.data as { id: string }[]).some((p) => p.id === patient.id)).toBe(false);
     });
   });
 

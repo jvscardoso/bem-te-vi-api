@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { PatientsService } from './patients.service.js';
 import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
+import { ListPatientsQueryDto } from './dto/list-patients-query.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
@@ -19,15 +20,15 @@ export class PatientsController {
 
   @RequirePermissions('patients:read')
   @Get()
-  findAll(@Param('tenantId') tenantId: string) {
-    return this.patientsService.findAll(tenantId);
+  findAll(@Param('tenantId') tenantId: string, @Query() query: ListPatientsQueryDto) {
+    return this.patientsService.findAll(tenantId, query);
   }
 
   // Antes de ':id' para não ser tratada como um id. Só quem pode escrever vê/restaura removidos.
   @RequirePermissions('patients:write')
   @Get('removed')
-  findRemoved(@Param('tenantId') tenantId: string) {
-    return this.patientsService.findRemoved(tenantId);
+  findRemoved(@Param('tenantId') tenantId: string, @Query() query: ListPatientsQueryDto) {
+    return this.patientsService.findRemoved(tenantId, query);
   }
 
   @RequirePermissions('patients:read')

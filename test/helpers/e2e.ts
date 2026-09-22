@@ -99,11 +99,11 @@ export async function createPatient(
   http: Http,
   admin: TestTenant,
   data: Record<string, unknown> = {},
-): Promise<{ id: string }> {
+): Promise<{ id: string; fullName: string }> {
   const res = await http()
     .post(`/tenants/${admin.tenantId}/patients`)
     .set(admin.auth)
-    .send({ fullName: `Paciente ${uniq()}`, ...data })
+    .send({ fullName: `Paciente x${uniq()}`, ...data })
     .expect(201);
   return res.body;
 }

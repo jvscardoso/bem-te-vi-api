@@ -83,8 +83,28 @@ Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/
 ## Pacientes
 
 - CRUD sob `/tenants/:tenantId/patients`; `DELETE` é soft delete (o registro e as fichas de anamnese continuam no banco, só somem das leituras).
+- **CPF guardado só com dígitos (11).** Aceita com ou sem pontuação na entrada (`123.456.789-01` e `12345678901` são o mesmo CPF) e sempre volta sem pontuação; o frontend formata para exibir. `null` limpa o campo. Sem essa normalização a unique e a busca por CPF não seriam confiáveis.
 - **CPF único por tenant, inclusive entre removidos.** O CPF de um paciente removido continua reservado, para não duplicar cadastro/prontuário. Tentar cadastrar (ou trocar para) esse CPF devolve `409` com `removedPatientId`, para o cliente oferecer "restaurar".
 - **Restauração:** `GET /patients/removed` lista os removidos e `POST /patients/:id/restore` desfaz o soft delete (dados e anamnese voltam intactos). Ambos exigem `patients:write`.
+
+### Listagem, busca e paginação
+
+`GET /tenants/:tenantId/patients` (e `GET /patients/removed`, com os mesmos parâmetros):
+
+| Parâmetro | Padrão | Regra |
+|---|---|---|
+| `q` | — | busca livre (até 100 caracteres) |
+| `page` | `1` | inteiro ≥ 1 |
+| `pageSize` | `20` | inteiro de 1 a 100 |
+
+Resposta: `{ "data": [...pacientes], "meta": { "total", "page", "pageSize", "totalPages" } }`. Ordem: nome (A–Z) com desempate por id, para as páginas não repetirem nem pularem registros; os removidos vêm do mais recentemente removido para o mais antigo. Página além da última devolve `data: []` com o `total` correto. Parâmetro inválido ou desconhecido → `400`.
+
+**Como a busca `q` funciona.** O texto é separado em palavras e **todas** precisam casar:
+- palavra com letras → casa no nome, em qualquer posição e ordem, sem diferenciar maiúsculas nem acentos (`joao silva` encontra "João da Silva"; `conceicao` encontra "Conceição");
+- palavra só com dígitos e `.`/`-` → casa no CPF, completo ou parcial, com ou sem pontuação (`123.456` = `123456`);
+- as duas se combinam: `maria 1234` = nome com "maria" **e** CPF contendo "1234". Curingas (`%`, `_`) e SQL digitados valem como texto literal.
+
+Implementação: os ids da página saem de SQL parametrizado (usa a extensão `unaccent`, criada pela migration `patient_search`; o usuário do banco precisa poder criá-la, o que é permitido a quem tem `CREATE` no banco por ser extensão *trusted*), e os registros vêm pelo Prisma. Sem índice de trigram por enquanto: cada busca varre os pacientes do tenant, o que basta para milhares de cadastros; se um tenant crescer muito, adicionar `pg_trgm`. **Limite:** uma palavra só com dígitos é sempre tratada como CPF, então um nome cadastrado com número isolado não é achado por esse número.
 
 ## Whitelabel / branding
 
@@ -143,7 +163,8 @@ Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes va
 - `npm test` — unitários (não precisam de banco).
 - `npm run test:e2e` — ponta a ponta, contra o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte. Setup compartilhado em `test/helpers/e2e.ts`.
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
-  - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF único, anamnese, isolamento.
+  - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese, isolamento.
+  - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.
   - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
