@@ -172,10 +172,40 @@ Centralizadas em `AccessPolicyService` (`src/access`), usado por `UsersService` 
 
 Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes vazava erro de FK); o email é gravado em minúsculas também na edição.
 
+## CI (`.github/workflows/ci.yml`)
+
+Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últimos só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
+
+| Job | O que valida |
+|---|---|
+| `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
+| `unit` | `npm test` (58 testes, sem banco) |
+| `e2e` | `npm run test:e2e` (224 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
+
+`newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
+
+## Testando a API manualmente (Postman / Insomnia)
+
+Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
+
+- `bem-te-vi.postman_collection.json` — 9 pastas, 82 requisições, em ordem de uso: saúde, autenticação, clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração), agenda (janela, status, conflitos) e isolamento entre clínicas.
+- `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
+
+**Como usar:** suba a API, importe os dois arquivos, selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
+
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 82 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+
+**Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
+
+**Regenerar:** a coleção é gerada por `node docs/api/build-collection.mjs` (edite o script, não o JSON). Também dá para rodá-la sem interface: `npx newman run docs/api/bem-te-vi.postman_collection.json -e docs/api/bem-te-vi.local.postman_environment.json --delay-request 150`.
+
 ## Testes
 
+- `npm run lint` / `npm run typecheck` — oxlint (type-aware) e `tsc --noEmit`.
 - `npm test` — unitários (não precisam de banco).
 - `npm run test:e2e` — ponta a ponta, contra o Postgres do `.env` (`docker compose up -d`, `prisma migrate dev` e `prisma db seed` antes). Cada execução cria tenants com sufixo único e remove tudo no final; o rate limit é desligado na suíte. Setup compartilhado em `test/helpers/e2e.ts`.
+  - `retry: 2` no config de e2e (`vitest.config.e2e.ts`): esses testes fazem muitas requisições reais contra o Postgres do Docker, e volume alto ocasionalmente esbarra em instabilidade de rede do ambiente (`ECONNRESET`, mais comum no Docker Desktop do Windows), não em bug de lógica — uma asserção errada continua falhando na repetição. A causa raiz mais comum (pool do Prisma sem TCP keepalive) já foi corrigida em `PrismaService`; o retry cobre o que sobra dessa classe de flake, mas só ajuda dentro de um `it()` — uma falha no `beforeAll` (setup do arquivo) derruba o arquivo inteiro sem repetir. Por isso o CI também reexecuta o comando `test:e2e` uma vez se ele falhar (ver abaixo).
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese, isolamento.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.

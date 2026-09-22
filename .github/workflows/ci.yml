@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Um push novo na mesma branch/PR cancela a execução anterior em andamento.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # Lint + typecheck primeiro: é o mais rápido e pega a maioria dos erros de digitação/tipo.
+  # Os demais jobs só rodam depois dele passar, para não gastar minutos de CI à toa.
+  checks:
+    name: Lint & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # O Prisma Client é gerado a partir do schema (não fica no git); lint --type-aware e
+      # o tsc precisam dele para resolver os tipos de `@prisma/client`.
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+
+  unit:
+    name: Testes unitários
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm test
+
+  # Ponta a ponta contra um Postgres real (o mesmo fluxo de `docker compose up -d` +
+  # `migrate deploy` + `db seed` do README, só que com um serviço efêmero do próprio Actions).
+  e2e:
+    name: Testes e2e
+    runs-on: ubuntu-latest
+    needs: checks
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: bem_te_vi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d bem_te_vi"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/bem_te_vi?schema=public
+      JWT_SECRET: ci-test-secret
+      JWT_EXPIRES_IN: 1d
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # `migrate deploy` (não `migrate dev`): é o que também roda em produção, não gera o
+      # client como efeito colateral nem pede confirmação interativa.
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npx prisma db seed
+      # Até 2 tentativas: cobre falha transiente de conexão contra o Postgres do serviço
+      # (`ECONNRESET`) que pode derrubar o `beforeAll` de um arquivo inteiro — o `retry` do
+      # vitest não reexecuta hooks de setup, só o corpo de um `it()`. Um erro de lógica não
+      # se beneficia disso: a mesma asserção falha de novo na 2ª tentativa.
+      - name: Testes e2e (com 1 nova tentativa em caso de falha de conexão)
+        run: |
+          npm run test:e2e || npm run test:e2e
+
+  # Sobe a stack real via docker-compose (a mesma imagem e o mesmo comando de start do
+  # deploy) e roda a coleção do Postman contra ela, via HTTP de verdade — cobre bootstrap
+  # (helmet, CORS, rate limit real), migrate+seed automáticos no container e a imagem em si.
+  docker-smoke:
+    name: Smoke test (Docker + Postman)
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # .env.example basta: JWT_SECRET de exemplo é o suficiente para este smoke test.
+      - run: cp .env.example .env
+      - run: docker compose --profile app up -d --build
+      - name: Esperar a API ficar saudável
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q api)" 2>/dev/null || true)
+            if [ "$status" = "healthy" ]; then
+              echo "API saudável após $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API não ficou saudável a tempo"
+          exit 1
+      - name: Rodar a coleção do Postman (newman)
+        run: |
+          npx --yes newman@6.2.2 run docs/api/bem-te-vi.postman_collection.json \
+            --environment docs/api/bem-te-vi.local.postman_environment.json \
+            --delay-request 150 \
+            --reporters cli
+      - name: Logs da API (se algo falhar acima)
+        if: failure()
+        run: docker compose logs api
+      - name: Encerrar a stack
+        if: always()
+        run: docker compose down -v

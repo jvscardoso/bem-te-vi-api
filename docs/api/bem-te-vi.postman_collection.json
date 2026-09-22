@@ -1,0 +1,3395 @@
+{
+  "info": {
+    "name": "bem-te-vi API",
+    "description": "Roteiro de ponta a ponta da API do bem-te-vi (SaaS whitelabel de clínicas e hospitais).\n\n**Como usar**\n1. Suba a API (`docker compose up -d` + `npm run start:dev`, ou `docker compose --profile app up -d --build`).\n2. Ajuste `baseUrl` (variável da coleção ou do ambiente \"bem-te-vi · local\").\n3. Rode as pastas **em ordem** (a 01 cria a clínica e o token; as demais usam o que as anteriores gravaram). Dá para rodar tudo de uma vez no Collection Runner.\n\n**Variáveis** ficam gravadas automaticamente por scripts (`tenantId`, `accessToken`, `patientId`...). Cada execução cria uma clínica nova, então pode repetir sem conflito.\n\n**Limites da API em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Se receber 429, espere um minuto.\n\n**Insomnia:** importe este mesmo arquivo. Os scripts (que gravam as variáveis e checam as respostas) só rodam se a sua versão tiver suporte a scripts com a API `pm.*`; senão, copie os valores (`tenantId`, `accessToken`...) manualmente para as variáveis.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "password",
+      "value": "Senha@12345"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 · Saúde",
+      "description": "Verifica se a API está no ar.",
+      "item": [
+        {
+          "name": "API no ar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            },
+            "description": "Rota pública. Responde 200 se a API subiu.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 · Autenticação",
+      "description": "Cria a clínica A (tenant + papel Admin + dono) e faz login. **Rode esta pasta primeiro:** ela grava `tenantId`, `accessToken` e outros que as demais pastas usam.\n\n⚠️ `POST /auth/login` tem limite de 5 tentativas por minuto por IP. Uma execução completa da coleção faz 4 logins; espere ~1 min antes de rodar de novo.",
+      "item": [
+        {
+          "name": "Criar clínica A (signup)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants"
+              ]
+            },
+            "description": "Rota pública. Cria, numa transação, o tenant + papel \"Admin\" (todas as permissões) + usuário dono. Cada execução gera um sufixo novo, então dá para repetir sem conflito.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Clínica {{suffix}}\",\n  \"subdomain\": \"clinica-{{suffix}}\",\n  \"owner\": {\n    \"name\": \"Dono {{suffix}}\",\n    \"email\": \"dono-{{suffix}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('suffix', Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('tenantId', b.tenant.id);",
+                  "pm.collectionVariables.set('ownerRoleId', b.role.id);",
+                  "pm.collectionVariables.set('ownerId', b.owner.id);",
+                  "pm.collectionVariables.set('ownerEmail', b.owner.email);",
+                  "pm.collectionVariables.set('subdomain', b.tenant.subdomain);",
+                  "pm.test(\"o dono nasce ativo e sem senha na resposta\", () => pm.expect(b.owner.status === 'active' && b.owner.passwordHash === undefined).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (dono)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Devolve o JWT. O token só prova identidade: as permissões são relidas do banco a cada requisição.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', b.accessToken);",
+                  "pm.test(\"o dono tem as 7 permissões\", () => pm.expect(b.user.permissions.length === 7).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login com senha errada",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "A mensagem é a mesma para senha errada, email inexistente e conta desativada (não dá pista a quem enumera contas).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"senha-errada\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"mensagem genérica\", () => pm.expect(b.message === 'Credenciais inválidas').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rota protegida sem token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "description": "Toda rota exige JWT, exceto as marcadas como públicas.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 · Clínica e marca (whitelabel)",
+      "description": "Configurações da clínica, identidade visual e a resolução **pública** da marca (usada pelo frontend na tela de login, antes de existir token).",
+      "item": [
+        {
+          "name": "Ver a clínica",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"branding ainda vazio\", () => pm.expect(b.branding === null).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar configurações e domínio próprio",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}"
+              ]
+            },
+            "description": "Duração padrão do atendimento (45 min), mínimo (15 min) e domínio próprio (validado como domínio e normalizado para minúsculas).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"defaultAppointmentDurationMinutes\": 45,\n  \"minAppointmentDurationMinutes\": 15,\n  \"customDomain\": \"agenda-{{suffix}}.exemplo.com.br\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('customDomain', b.customDomain);",
+                  "pm.test(\"duração padrão 45\", () => pm.expect(b.defaultAppointmentDurationMinutes === 45).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tentar suspender a própria clínica",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}"
+              ]
+            },
+            "description": "Suspensão é ação da plataforma: o campo `status` não é aceito para o admin da clínica.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"suspended\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar marca",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "branding"
+              ]
+            },
+            "description": "Envio parcial. Cores `#RRGGBB`; `logoUrl` só `https`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tradeName\": \"Clínica Sorriso\",\n  \"logoUrl\": \"https://cdn.exemplo.com/logo.png\",\n  \"primaryColor\": \"#1A73E8\",\n  \"secondaryColor\": \"#FFFFFF\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"cor gravada\", () => pm.expect(b.primaryColor === '#1A73E8').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marca inválida (cor com 8 dígitos)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "branding"
+              ]
+            },
+            "description": "Antes este valor estourava a coluna e dava 500; agora é 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"primaryColor\": \"#12345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limpar o logo (null)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "branding"
+              ]
+            },
+            "description": "`null` limpa o campo sem mexer nos outros.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"logoUrl\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"logo limpo e cor preservada\", () => pm.expect(b.logoUrl === null && b.primaryColor === '#1A73E8').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marca pública — por subdomínio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/public/branding?host={{subdomain}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "branding"
+              ],
+              "query": [
+                {
+                  "key": "host",
+                  "value": "{{subdomain}}"
+                }
+              ]
+            },
+            "description": "Sem login. O frontend chama com o host de onde é servido. Sem `APP_BASE_DOMAIN`, um host sem ponto vale como subdomínio. Só campos de marca são expostos.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"só campos de marca\", () => pm.expect(Object.keys(b).sort().join() === 'logoUrl,name,primaryColor,secondaryColor,tradeName').to.be.true);",
+                  "pm.test(\"nome fantasia\", () => pm.expect(b.tradeName === 'Clínica Sorriso').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marca pública — por domínio próprio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/public/branding?host={{customDomain}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "branding"
+              ],
+              "query": [
+                {
+                  "key": "host",
+                  "value": "{{customDomain}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"mesma clínica\", () => pm.expect(b.tradeName === 'Clínica Sorriso').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marca pública — host inexistente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/public/branding?host=nao-existe-{{suffix}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "branding"
+              ],
+              "query": [
+                {
+                  "key": "host",
+                  "value": "nao-existe-{{suffix}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 · Papéis e permissões",
+      "description": "O catálogo de permissões é global; cada clínica monta os papéis que quiser. \"Listar papéis\" grava os ids das permissões, usados para montar os papéis seguintes.",
+      "item": [
+        {
+          "name": "Listar papéis (e capturar ids das permissões)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const admin = b.find((r) => r.name === 'Admin');",
+                  "const id = (key) => admin.permissions.find((p) => p.permission.key === key).permission.id;",
+                  "pm.collectionVariables.set('permPatientsRead', id('patients:read'));",
+                  "pm.collectionVariables.set('permPatientsWrite', id('patients:write'));",
+                  "pm.collectionVariables.set('permAppointmentsRead', id('appointments:read'));",
+                  "pm.collectionVariables.set('permAppointmentsWrite', id('appointments:write'));",
+                  "pm.collectionVariables.set('permUsersManage', id('users:manage'));",
+                  "pm.collectionVariables.set('permRolesManage', id('roles:manage'));",
+                  "pm.collectionVariables.set('permTenantManage', id('tenant:manage'));",
+                  "pm.test(\"o papel Admin tem as 7 permissões\", () => pm.expect(admin.permissions.length === 7).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar papel \"Gestor\"",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles"
+              ]
+            },
+            "description": "Atende pacientes e agenda e também gerencia usuários — mas **não** papéis nem a clínica. É o papel do usuário limitado usado nas pastas seguintes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Gestor\",\n  \"description\": \"Atende pacientes e agenda e gerencia usuários\",\n  \"permissionIds\": [\n    \"{{permPatientsRead}}\",\n    \"{{permPatientsWrite}}\",\n    \"{{permAppointmentsRead}}\",\n    \"{{permAppointmentsWrite}}\",\n    \"{{permUsersManage}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('gestorRoleId', b.id);",
+                  "pm.test(\"5 permissões\", () => pm.expect(b.permissions.length === 5).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obter papel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles/{{gestorRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles",
+                "{{gestorRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar papel",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles/{{gestorRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles",
+                "{{gestorRoleId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Gestor da recepção: pacientes, agenda e usuários\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"descrição nova\", () => pm.expect(b.description.startsWith('Gestor da recepção')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Permissão inexistente",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles"
+              ]
+            },
+            "description": "Id de permissão que não existe: erro do cliente (400), não do banco.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fantasma\",\n  \"permissionIds\": [\n    \"{{$guid}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar papel descartável",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Descartável\",\n  \"permissionIds\": [\n    \"{{permPatientsRead}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('disposableRoleId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Apagar papel livre",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles/{{disposableRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles",
+                "{{disposableRoleId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 · Usuários",
+      "description": "Cria o usuário \"Gestor\" (também é o profissional que atende na agenda) e mostra a duração própria de atendimento.",
+      "item": [
+        {
+          "name": "Listar usuários",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"só o dono por enquanto\", () => pm.expect(b.length === 1 && b[0].passwordHash === undefined).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar usuário (Gestor)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users"
+              ]
+            },
+            "description": "O papel precisa ser do mesmo tenant e ter só permissões que quem cria também possui.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dra. Helena\",\n  \"email\": \"gestor-{{suffix}}@exemplo.com\",\n  \"password\": \"{{password}}\",\n  \"roleId\": \"{{gestorRoleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('professionalId', b.id);",
+                  "pm.collectionVariables.set('professionalEmail', b.email);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obter usuário",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{professionalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{professionalId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar usuário",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{professionalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{professionalId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dra. Helena Souza\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"nome novo\", () => pm.expect(b.name === 'Dra. Helena Souza').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (Gestor)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{professionalEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('gestorToken', b.accessToken);",
+                  "pm.test(\"5 permissões\", () => pm.expect(b.user.permissions.length === 5).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Minha duração de atendimento (Gestor)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/me/appointment-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "me",
+                "appointment-settings"
+              ]
+            },
+            "description": "O próprio profissional ajusta a duração sem precisar de `users:manage`. Vale o mínimo da clínica (15 min).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"defaultAppointmentDurationMinutes\": 50\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"duração 50\", () => pm.expect(b.defaultAppointmentDurationMinutes === 50).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Voltar à duração da clínica (null)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/me/appointment-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "me",
+                "appointment-settings"
+              ]
+            },
+            "description": "`null` remove a duração própria e volta a valer a da clínica (45 min).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"defaultAppointmentDurationMinutes\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"sem duração própria\", () => pm.expect(b.defaultAppointmentDurationMinutes === null).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desativar usuário",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{professionalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{professionalId}}"
+              ]
+            },
+            "description": "Efeito imediato: o token dele deixa de valer na próxima requisição.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"disabled\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token do usuário desativado deixa de valer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reativar usuário",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{professionalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{professionalId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 · Regras de conta",
+      "description": "Escalada de privilégio (403) e proteção do último administrador (409). Os passos com \"(Gestor)\" usam o token do usuário limitado; os demais, o do dono.",
+      "item": [
+        {
+          "name": "Gestor não cria usuário com papel Admin",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users"
+              ]
+            },
+            "description": "Só se concede o que se possui: o Gestor não tem `roles:manage` nem `tenant:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Promovido\",\n  \"email\": \"promovido-{{suffix}}@exemplo.com\",\n  \"password\": \"{{password}}\",\n  \"roleId\": \"{{ownerRoleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"cita as permissões que faltam\", () => pm.expect(b.message.includes('roles:manage')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gestor não se promove a Admin",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{professionalId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{professionalId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleId\": \"{{ownerRoleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gestor não altera o dono (usuário \"acima\")",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{ownerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{ownerId}}"
+              ]
+            },
+            "description": "Ninguém altera um usuário cujo papel tem permissões que o ator não tem.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"disabled\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{gestorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dono (único admin) não pode se desativar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{ownerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{ownerId}}"
+              ]
+            },
+            "description": "O tenant precisa manter ao menos um administrador ativo (papel com `users:manage`, `roles:manage` e `tenant:manage`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"disabled\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"cita administrador\", () => pm.expect(b.message.includes('administrador')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dono não pode trocar o próprio papel",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/users/{{ownerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "users",
+                "{{ownerId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleId\": \"{{gestorRoleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Não dá para tirar `tenant:manage` do papel Admin",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles/{{ownerRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles",
+                "{{ownerRoleId}}"
+              ]
+            },
+            "description": "Enviar o papel Admin sem `tenant:manage` deixaria a clínica sem administrador.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissionIds\": [\n    \"{{permPatientsRead}}\",\n    \"{{permPatientsWrite}}\",\n    \"{{permAppointmentsRead}}\",\n    \"{{permAppointmentsWrite}}\",\n    \"{{permUsersManage}}\",\n    \"{{permRolesManage}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Papel em uso não pode ser apagado",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/roles/{{gestorRoleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "roles",
+                "{{gestorRoleId}}"
+              ]
+            },
+            "description": "O Gestor ainda usa este papel: 409, não 500."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 · Pacientes",
+      "description": "CRUD, busca (nome, sobrenome e CPF), paginação, anamnese, exclusão e restauração.\n\nO CPF é guardado só com dígitos: `123.456.789-01` e `12345678901` são o mesmo CPF.",
+      "item": [
+        {
+          "name": "Criar paciente (Maria)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Maria da Silva\",\n  \"cpf\": \"123.456.789-01\",\n  \"birthDate\": \"1990-05-17\",\n  \"phone\": \"(11) 91234-5678\",\n  \"email\": \"maria@exemplo.com\",\n  \"address\": {\n    \"rua\": \"Rua das Flores\",\n    \"numero\": 10,\n    \"cidade\": \"São Paulo\"\n  },\n  \"notes\": \"Prefere atendimento à tarde\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('patientId', b.id);",
+                  "pm.test(\"CPF normalizado para dígitos\", () => pm.expect(b.cpf === '12345678901').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar paciente (João)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"João Pedro Souza\",\n  \"cpf\": \"987.654.321-00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('patient2Id', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar paciente sem CPF (Ana)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Ana Paula Lima\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('patient3Id', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CPF repetido em outro formato",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "description": "O CPF é único por tenant, mesmo digitado com/sem pontuação.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Maria Duplicada\",\n  \"cpf\": \"12345678901\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"cita CPF\", () => pm.expect(/cpf/i.test(b.message)).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CPF inválido",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Fulano\",\n  \"cpf\": \"123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar pacientes (padrão)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "maria",
+                  "disabled": true,
+                  "description": "Busca livre: nome, sobrenome e/ou CPF"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "disabled": true,
+                  "description": "padrão 20, máximo 100"
+                }
+              ]
+            },
+            "description": "Resposta paginada: `{ data, meta: { total, page, pageSize, totalPages } }`, em ordem alfabética."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"3 pacientes, em ordem alfabética\", () => pm.expect(b.meta.total === 3 && b.data.map((p) => p.fullName).join('|') === 'Ana Paula Lima|João Pedro Souza|Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar por nome e sobrenome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?q=silva%20maria",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "silva maria"
+                }
+              ]
+            },
+            "description": "Todas as palavras precisam casar, em qualquer ordem, sem diferenciar maiúsculas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"só a Maria\", () => pm.expect(b.data.length === 1 && b.data[0].fullName === 'Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar sem acento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?q=joao",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "joao"
+                }
+              ]
+            },
+            "description": "`joao` encontra \"João\" (busca sem diferenciar acentos)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"achou o João\", () => pm.expect(b.data.length === 1 && b.data[0].fullName === 'João Pedro Souza').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar por CPF (parcial, com pontuação)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?q=123.456",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "123.456"
+                }
+              ]
+            },
+            "description": "Palavra só com dígitos, `.` e `-` casa no CPF: `123.456` = `123456`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"achou a Maria\", () => pm.expect(b.data.length === 1 && b.data[0].fullName === 'Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paginar (2 por página)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?page=2&pageSize=2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "2"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "2"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"página 2 de 2, com 1 item\", () => pm.expect(b.meta.totalPages === 2 && b.meta.page === 2 && b.data.length === 1).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Parâmetro de paginação inválido",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?pageSize=101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "101"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obter paciente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patientId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patientId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar paciente",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patientId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patientId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"(11) 98888-7777\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"telefone novo e nome preservado\", () => pm.expect(b.phone === '(11) 98888-7777' && b.fullName === 'Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar anamnese",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patientId}}/anamnesis-records",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patientId}}",
+                "anamnesis-records"
+              ]
+            },
+            "description": "Ficha livre em JSON. Guarda quem preencheu.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"queixa_principal\": \"Dor de cabeça recorrente\",\n    \"alergias\": [\n      \"dipirona\"\n    ],\n    \"fumante\": false\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"autor registrado\", () => pm.expect(b.filledByUserId === pm.collectionVariables.get(\"ownerId\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar anamneses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patientId}}/anamnesis-records",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patientId}}",
+                "anamnesis-records"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"1 ficha\", () => pm.expect(b.length === 1).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remover paciente (João)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patient2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patient2Id}}"
+              ]
+            },
+            "description": "Soft delete: some das leituras, mas o registro e as fichas continuam no banco."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paciente removido não aparece",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patient2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patient2Id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar removidos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/removed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "removed"
+              ]
+            },
+            "description": "Exige `patients:write`. Aceita os mesmos `q`, `page` e `pageSize`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"João está nos removidos\", () => pm.expect(b.data.some((p) => p.id === pm.collectionVariables.get(\"patient2Id\"))).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recadastrar o CPF de um removido",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "description": "O CPF de um removido continua reservado. O 409 traz `removedPatientId` para o frontend oferecer \"restaurar\".",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"João Recadastrado\",\n  \"cpf\": \"987.654.321-00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"aponta o paciente a restaurar\", () => pm.expect(b.removedPatientId === pm.collectionVariables.get(\"patient2Id\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Restaurar paciente",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patient2Id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patient2Id}}",
+                "restore"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"deletedAt nulo\", () => pm.expect(b.deletedAt === null).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paciente restaurado volta a aparecer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patient2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patient2Id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 · Agenda",
+      "description": "Agendamentos do profissional (Dra. Helena) daqui a 3 dias. As datas são geradas automaticamente (variáveis `t0900`, `t1000`...), então dá para rodar em qualquer dia.\n\nRegras: um profissional não pode ter dois agendamentos ativos sobrepostos (409); só o início → fim = duração do profissional ou da clínica (45 min).",
+      "item": [
+        {
+          "name": "Criar agendamento (só o início)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ]
+            },
+            "description": "Sem `endsAt`: o fim é calculado com a duração padrão da clínica (45 min, configurada na pasta 02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{professionalId}}\",\n  \"scheduledAt\": \"{{t0900}}\",\n  \"notes\": \"Primeira consulta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('appointmentId', b.id);",
+                  "pm.test(\"fim = início + 45 min\", () => pm.expect((new Date(b.endsAt) - new Date(b.scheduledAt)) / 60000 === 45).to.be.true);",
+                  "pm.test(\"nasce agendado\", () => pm.expect(b.status === 'scheduled').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar agendamento (início e fim)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{professionalId}}\",\n  \"scheduledAt\": \"{{t1000}}\",\n  \"endsAt\": \"{{t1100}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('appointment2Id', b.id);",
+                  "pm.test(\"60 min\", () => pm.expect((new Date(b.endsAt) - new Date(b.scheduledAt)) / 60000 === 60).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conflito de horário",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ]
+            },
+            "description": "09:15 cai dentro do agendamento das 09:00 (que vai até 09:45): 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{professionalId}}\",\n  \"scheduledAt\": \"{{t0915}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Abaixo da duração mínima da clínica",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ]
+            },
+            "description": "A clínica exige no mínimo 15 min; aqui são 10.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{professionalId}}\",\n  \"scheduledAt\": \"{{t1300}}\",\n  \"endsAt\": \"{{t1310}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"cita o mínimo\", () => pm.expect(b.message.includes('15 minutos')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fim antes do início",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{professionalId}}\",\n  \"scheduledAt\": \"{{t1100}}\",\n  \"endsAt\": \"{{t1000}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar agenda (padrão)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "professionalId",
+                  "value": "{{professionalId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "patientId",
+                  "value": "{{patientId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "{{dayStart}}",
+                  "disabled": true,
+                  "description": "Janela por sobreposição: termina depois de `from`..."
+                },
+                {
+                  "key": "to",
+                  "value": "{{dayEnd}}",
+                  "disabled": true,
+                  "description": "...e começa até `to` (inclusive)"
+                },
+                {
+                  "key": "status",
+                  "value": "scheduled,confirmed",
+                  "disabled": true,
+                  "description": "um ou mais, separados por vírgula"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "50",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paginada (`pageSize` padrão 50, máximo 200), do mais cedo ao mais tarde. Ative os parâmetros abaixo para filtrar."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"2 agendamentos, em ordem\", () => pm.expect(b.meta.total === 2 && b.data[0].id === pm.collectionVariables.get(\"appointmentId\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Janela por sobreposição (atendimento em andamento)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?from={{t0930}}&to={{t1000}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{t0930}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{t1000}}"
+                }
+              ]
+            },
+            "description": "Janela 09:30–10:00. O agendamento das 09:00–09:45 já começou, mas ainda está em andamento na janela — **entra**. O das 10:00 começa exatamente em `to` — **entra** (limite superior inclusivo)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"os dois entram\", () => pm.expect(b.meta.total === 2).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Janela que só encosta (fica de fora)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?from={{t0945}}&to={{t1000}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{t0945}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{t1000}}"
+                }
+              ]
+            },
+            "description": "Janela a partir das 09:45: o das 09:00 termina exatamente às 09:45 (só encosta) e sai; entra só o das 10:00."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"só o das 10:00\", () => pm.expect(b.meta.total === 1 && b.data[0].id === pm.collectionVariables.get(\"appointment2Id\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Janela invertida",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?from={{t1100}}&to={{t0900}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{t1100}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{t0900}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obter agendamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments/{{appointmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments",
+                "{{appointmentId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remarcar (só o início)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments/{{appointmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments",
+                "{{appointmentId}}"
+              ]
+            },
+            "description": "Ao remarcar só o início, a duração original (45 min) é mantida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scheduledAt\": \"{{t1200}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"duração mantida\", () => pm.expect((new Date(b.endsAt) - new Date(b.scheduledAt)) / 60000 === 45).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirmar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments/{{appointmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments",
+                "{{appointmentId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"confirmado\", () => pm.expect(b.status === 'confirmed').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Transição de status inválida",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments/{{appointmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments",
+                "{{appointmentId}}"
+              ]
+            },
+            "description": "`confirmed → scheduled` não existe. Transições: scheduled → confirmed | completed | cancelled | no_show; confirmed → completed | cancelled | no_show.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"scheduled\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancelar (DELETE)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments/{{appointmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments",
+                "{{appointmentId}}"
+              ]
+            },
+            "description": "Cancela, não apaga: o registro continua, com status `cancelled`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar só os cancelados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?status=cancelled",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "cancelled"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"achou o cancelado\", () => pm.expect(b.meta.total === 1 && b.data[0].status === 'cancelled').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar sem cancelados (calendário)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?status=scheduled%2Cconfirmed%2Ccompleted",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "scheduled,confirmed,completed"
+                }
+              ]
+            },
+            "description": "Para uma grade sem cancelados e faltas: `status=scheduled,confirmed,completed`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"só o das 10:00\", () => pm.expect(b.meta.total === 1 && b.data[0].id === pm.collectionVariables.get(\"appointment2Id\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status inválido no filtro",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/appointments?status=arquivado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "appointments"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "arquivado"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Datas de 3 dias à frente (UTC), recalculadas a cada requisição desta pasta.",
+              "const now = new Date();",
+              "const day = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 3);",
+              "const at = (h, m = 0) => new Date(day + (h * 60 + m) * 60000).toISOString();",
+              "pm.collectionVariables.set('dayStart', at(0));",
+              "pm.collectionVariables.set('dayEnd', at(23, 59));",
+              "pm.collectionVariables.set('t0900', at(9));",
+              "pm.collectionVariables.set('t0915', at(9, 15));",
+              "pm.collectionVariables.set('t0930', at(9, 30));",
+              "pm.collectionVariables.set('t0945', at(9, 45));",
+              "pm.collectionVariables.set('t1000', at(10));",
+              "pm.collectionVariables.set('t1100', at(11));",
+              "pm.collectionVariables.set('t1200', at(12));",
+              "pm.collectionVariables.set('t1300', at(13));",
+              "pm.collectionVariables.set('t1310', at(13, 10));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 · Isolamento entre clínicas",
+      "description": "Cria uma segunda clínica (B) e prova que ela não enxerga nem altera dados da clínica A.",
+      "item": [
+        {
+          "name": "Criar clínica B (signup)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Clínica {{suffixB}}\",\n  \"subdomain\": \"clinica-{{suffixB}}\",\n  \"owner\": {\n    \"name\": \"Dono B\",\n    \"email\": \"dono-{{suffixB}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('suffixB', Date.now().toString(36) + 'b');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('tenantBId', b.tenant.id);",
+                  "pm.collectionVariables.set('ownerBId', b.owner.id);",
+                  "pm.collectionVariables.set('ownerBEmail', b.owner.email);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (dono da clínica B)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerBEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('tokenB', b.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token B na URL da clínica A",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ]
+            },
+            "description": "O `:tenantId` da URL precisa bater com o do token.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenB}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paciente da clínica A pela URL da clínica B",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantBId}}/patients/{{patientId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantBId}}",
+                "patients",
+                "{{patientId}}"
+              ]
+            },
+            "description": "Mesmo com o id certo, o paciente é de outro tenant: 404 (não vaza que existe).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenB}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A clínica B não vê pacientes da A",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantBId}}/patients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantBId}}",
+                "patients"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenB}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"lista vazia\", () => pm.expect(b.meta.total === 0).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agendar com paciente de outra clínica",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantBId}}/appointments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantBId}}",
+                "appointments"
+              ]
+            },
+            "description": "O FK do banco aceitaria; a API confere que o paciente é do tenant.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patientId\": \"{{patientId}}\",\n  \"professionalId\": \"{{ownerBId}}\",\n  \"scheduledAt\": \"{{t1000}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenB}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"paciente inválido para este tenant\", () => pm.expect(b.message.includes('patientId')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Reaproveita as datas da pasta de agenda (o Runner executa em ordem; manualmente, rode a 07 antes).",
+              "if (!pm.collectionVariables.get('t1000')) {",
+              "  const now = new Date();",
+              "  const day = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 3);",
+              "  pm.collectionVariables.set('t1000', new Date(day + 10 * 3600000).toISOString());",
+              "}"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
