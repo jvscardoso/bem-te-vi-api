@@ -3,6 +3,8 @@ import { RolesService } from './roles.service.js';
 import { CreateRoleDto } from './dto/create-role.dto.js';
 import { UpdateRoleDto } from './dto/update-role.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 
 @RequirePermissions('roles:manage')
 @Controller('tenants/:tenantId/roles')
@@ -10,8 +12,12 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Post()
-  create(@Param('tenantId') tenantId: string, @Body() dto: CreateRoleDto) {
-    return this.rolesService.create(tenantId, dto);
+  create(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body() dto: CreateRoleDto,
+  ) {
+    return this.rolesService.create(tenantId, actor, dto);
   }
 
   @Get()
@@ -27,14 +33,19 @@ export class RolesController {
   @Patch(':id')
   update(
     @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateRoleDto,
   ) {
-    return this.rolesService.update(tenantId, id, dto);
+    return this.rolesService.update(tenantId, actor, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('tenantId') tenantId: string, @Param('id') id: string) {
-    return this.rolesService.remove(tenantId, id);
+  remove(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.rolesService.remove(tenantId, actor, id);
   }
 }

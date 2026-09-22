@@ -125,6 +125,19 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 
 **Suspensão de tenant** é ação da plataforma: `status` não é aceito em `PATCH /tenants/:id`, para o admin da clínica não conseguir suspender (ou reativar) o próprio tenant. Enquanto não existir um painel/papel de plataforma, altera-se direto no banco.
 
+## Regras de conta (usuários e papéis)
+
+Centralizadas em `AccessPolicyService` (`src/access`), usado por `UsersService` e `RolesService`.
+
+**Sem escalada de privilégio** (403). Compara as permissões *atuais* do ator (relidas do banco a cada request):
+- só se concede o que se possui: criar/editar um papel, criar um usuário com um papel ou atribuir um papel a alguém exige que o ator tenha todas as permissões envolvidas (quem tem `users:manage` não consegue se promover a Admin);
+- ninguém altera um usuário ou papel "acima" de si (cujo papel tem permissões que o ator não tem), mesmo para renomear, desativar ou apagar;
+- alterar a si mesmo é permitido, dentro das regras de concessão (dá para se rebaixar, não para se promover).
+
+**Sempre existe um administrador ativo** (409). "Administrador" é quem está ativo e tem um papel com `users:manage`, `roles:manage` e `tenant:manage` (definido pelas permissões, não pelo nome do papel). Desativar o último, trocar o papel dele ou tirar essas permissões do papel é recusado e desfeito. A checagem roda numa transação com advisory lock por tenant, para dois admins não se rebaixarem ao mesmo tempo. Um tenant que já estava sem administrador não é bloqueado por isso.
+
+Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes vazava erro de FK); o email é gravado em minúsculas também na edição.
+
 ## Testes
 
 - `npm test` — unitários (não precisam de banco).
@@ -134,3 +147,4 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
   - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
+  - `account-rules.e2e-spec.ts` — escalada de privilégio (usuários e papéis), último administrador e corrida entre admins (sem o lock por tenant os testes de concorrência falham).

@@ -67,12 +67,12 @@ describe('Tradução de erros do banco (e2e)', () => {
       .expect(409);
   });
 
-  it('atribuir permissão inexistente a um papel dá 409 (FK), não 500', async () => {
+  it('atribuir permissão inexistente a um papel dá 400 (erro do cliente), não 500', async () => {
     await ctx
       .http()
       .post(`/tenants/${a.tenantId}/roles`)
       .set(a.auth)
       .send({ name: 'Fantasma', permissionIds: [randomUUID()] })
-      .expect(409);
+      .expect(400);
   });
 });

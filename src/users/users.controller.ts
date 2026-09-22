@@ -13,8 +13,12 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  create(@Param('tenantId') tenantId: string, @Body() dto: CreateUserDto) {
-    return this.usersService.create(tenantId, dto);
+  create(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body() dto: CreateUserDto,
+  ) {
+    return this.usersService.create(tenantId, actor, dto);
   }
 
   @Get()
@@ -31,7 +35,7 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateAppointmentSettingsDto,
   ) {
-    return this.usersService.updateOwnAppointmentSettings(tenantId, user.userId, dto);
+    return this.usersService.updateOwnAppointmentSettings(tenantId, user, dto);
   }
 
   @Get(':id')
@@ -42,9 +46,10 @@ export class UsersController {
   @Patch(':id')
   update(
     @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
   ) {
-    return this.usersService.update(tenantId, id, dto);
+    return this.usersService.update(tenantId, actor, id, dto);
   }
 }
