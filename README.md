@@ -40,6 +40,12 @@ API do bem-te-vi — SaaS whitelabel de gestão de clínicas e hospitais (agenda
    npm run start:dev
    ```
 
+6. Opcional — crie o primeiro admin do backoffice da plataforma (ver "Backoffice da plataforma" abaixo):
+
+   ```bash
+   PLATFORM_ADMIN_EMAIL=voce@empresa.com PLATFORM_ADMIN_PASSWORD="senha-forte" npm run bootstrap:platform
+   ```
+
 ### Rodando tudo em containers
 
 Alternativa ao passo a passo acima: sobe Postgres + API na imagem do `Dockerfile`. Só precisa do `.env` (o `JWT_SECRET` é obrigatório):
@@ -209,6 +215,27 @@ Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes va
 
 **Listagem e paginação.** `GET /tenants/:tenantId/users` e `GET /tenants/:tenantId/roles` são paginados (mesmo padrão de pacientes/agenda: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" } }`, `page` padrão `1`, `pageSize` padrão `20` e máximo `100`; parâmetro inválido ou desconhecido → `400`). Ordenados por nome, com desempate por id. Sem busca por texto por enquanto (`q`) — são listas tipicamente pequenas por clínica; se isso mudar, adicionar do mesmo jeito que em pacientes.
 
+## Backoffice da plataforma (`src/platform`)
+
+Gerencia as clínicas **como contas** (listar, suspender/reativar) — não é um jeito de acessar prontuário, agenda ou anamnese de nenhuma clínica; isso continua isolado por `TenantAccessGuard` como sempre foi, sem exceção.
+
+- `GET /platform/tenants` — paginado (mesmo contrato de pacientes/agenda/usuários), com `_count.users` e `_count.patients` por clínica. A própria clínica-plataforma nunca aparece na lista.
+  - **Busca (`q`):** mesma regra de pacientes — cada palavra precisa casar (em nome, subdomínio **ou** domínio próprio), sem diferenciar maiúsculas/acentos no nome (`unaccent`), curingas do LIKE tratados como texto literal. Útil porque, ao contrário de usuários/papéis por clínica, o número de clínicas cresce com o negócio.
+- `PATCH /platform/tenants/:id/status` — `{ "status": "active" | "suspended" }`. É a ação que antes só existia mexendo direto no banco.
+- Ambas exigem a permissão `platform:manage`.
+
+**Como isso não vira uma porta para escalar privilégio.** `platform:manage` é uma permissão do mesmo catálogo global de sempre, mas o signup público (`POST /tenants`) a exclui explicitamente da concessão automática ao papel "Admin" de uma clínica nova (`TenantsService.create`, comentado como `CRÍTICO` no código). Sem essa exclusão, qualquer pessoa que se cadastrasse publicamente ganharia acesso ao backoffice — testado e comprovado em `platform.e2e-spec.ts` (removi a exclusão de propósito para confirmar que o teste pega; ela derruba 2 testes).
+
+**Rotas fora da árvore `/tenants/:tenantId/...` de propósito.** Sem `:tenantId` na URL, o `TenantAccessGuard` global nem tem o que checar (ele já ignora rotas sem esse parâmetro) — o controle de acesso é só a permissão, igual a qualquer outra rota da API.
+
+**Como criar o primeiro admin do backoffice.** Nunca pelo signup público — um script dedicado:
+
+```bash
+PLATFORM_ADMIN_EMAIL=voce@empresa.com PLATFORM_ADMIN_PASSWORD="senha-forte" npm run bootstrap:platform
+```
+
+Cria a clínica-plataforma (`Tenant.isPlatform = true`, invisível nas listagens normais e neste backoffice), o papel com `platform:manage` e o usuário — tudo idempotente (rodar de novo não duplica nada nem reseta senha de quem já existe). Depende do catálogo de permissões já ter sido semeado (`npx prisma db seed`). A própria clínica-plataforma não pode ser suspensa por `PATCH /platform/tenants/:id/status` (dá `404`, como se não existisse ali).
+
 ## CI (`.github/workflows/ci.yml`)
 
 Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últimos só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
@@ -245,6 +272,7 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `retry: 2` no config de e2e (`vitest.config.e2e.ts`): esses testes fazem muitas requisições reais contra o Postgres do Docker, e volume alto ocasionalmente esbarra em instabilidade de rede do ambiente (`ECONNRESET`, mais comum no Docker Desktop do Windows), não em bug de lógica — uma asserção errada continua falhando na repetição. A causa raiz mais comum (pool do Prisma sem TCP keepalive) já foi corrigida em `PrismaService`; o retry cobre o que sobra dessa classe de flake, mas só ajuda dentro de um `it()` — uma falha no `beforeAll` (setup do arquivo) derruba o arquivo inteiro sem repetir. Por isso o CI também reexecuta o comando `test:e2e` uma vez se ele falhar (ver abaixo).
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
   - `users-roles-pagination.e2e-spec.ts` — paginação de usuários e papéis: páginas sem repetir/pular, ordenação por nome com desempate por id (usuários; papéis não têm nome duplicado por causa da unique), total conforme o tenant, limites e validação.
+  - `platform.e2e-spec.ts` — backoffice: acesso (401/403), listagem (contagens, exclusão da própria clínica-plataforma), busca por nome/subdomínio/domínio próprio (acentos, curingas, SQL como texto), suspender/reativar, e o teste crítico de que o signup público nunca ganha `platform:manage` (comprovado removendo a exclusão de propósito: derruba 2 testes).
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese (com template), isolamento.
   - `anamnesis-templates.e2e-spec.ts` — CRUD de formulários, validação da forma dos campos (tipos, select/multiselect exigindo opções, key única/padrão), 409 ao apagar em uso, permissões, e a validação de `answers` na integração com pacientes.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.

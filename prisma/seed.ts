@@ -12,6 +12,9 @@ const PERMISSIONS = [
   { key: 'roles:manage', description: 'Gerenciar papéis e permissões' },
   { key: 'tenant:manage', description: 'Gerenciar dados e marca do tenant' },
   { key: 'anamnesis_templates:manage', description: 'Criar/editar/apagar formulários de anamnese' },
+  // Backoffice da própria plataforma (listar/suspender clínicas). Nunca concedida
+  // automaticamente no signup — ver o filtro em TenantsService.create().
+  { key: 'platform:manage', description: 'Gerenciar tenants da plataforma (backoffice)' },
 ];
 
 async function main() {

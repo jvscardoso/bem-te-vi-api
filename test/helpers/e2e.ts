@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hash } from 'bcryptjs';
 import { Test } from '@nestjs/testing';
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
@@ -140,6 +141,25 @@ export async function createAnamnesisTemplate(
     .send({ name: `Ficha ${uniq()}`, fields })
     .expect(201);
   return res.body;
+}
+
+// Provisiona um admin de plataforma como `prisma/bootstrap-platform.ts` faria — de propósito
+// nunca via POST /tenants (signup público), que não tem como conceder platform:manage.
+export async function createPlatformAdmin(ctx: TestApp): Promise<TestTenant> {
+  const tenant = await ctx.prisma.tenant.create({
+    data: { name: `Plataforma ${uniq()}`, subdomain: `platform-${uniq()}`, isPlatform: true },
+  });
+  const permission = await ctx.prisma.permission.findUniqueOrThrow({ where: { key: 'platform:manage' } });
+  const role = await ctx.prisma.role.create({
+    data: { tenantId: tenant.id, name: 'Platform Admin', description: 'Acesso ao backoffice' },
+  });
+  await ctx.prisma.rolePermission.create({ data: { roleId: role.id, permissionId: permission.id } });
+  const email = `platform-admin-${uniq()}@teste.com`;
+  await ctx.prisma.user.create({
+    data: { tenantId: tenant.id, roleId: role.id, name: 'Platform Admin', email, passwordHash: await hash(PASSWORD, 4) },
+  });
+  const owner = await loginAs(ctx.http, email);
+  return { ...owner, tenantId: tenant.id, roleId: role.id };
 }
 
 export async function permissionIds(prisma: PrismaService, keys: string[]): Promise<string[]> {

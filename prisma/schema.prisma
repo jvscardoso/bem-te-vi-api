@@ -37,6 +37,10 @@ model Tenant {
   customDomainVerificationToken String?   @map("custom_domain_verification_token") @db.VarChar(64)
   customDomainVerifiedAt        DateTime? @map("custom_domain_verified_at")
   status        TenantStatus @default(active)
+  // A clínica que hospeda o backoffice da própria plataforma (não é uma cliente). Só criada
+  // por `prisma/bootstrap-platform.ts`, nunca pelo signup público — CreateTenantDto não tem
+  // este campo, então não há como uma requisição de fora setá-lo.
+  isPlatform    Boolean      @default(false) @map("is_platform")
   // Duração do atendimento usada quando o agendamento não informa o fim e o profissional
   // não tem duração própria; e o piso aplicado a qualquer agendamento da clínica
   // (ex.: estética 30 min; psicologia com mínimo de 60 min).

@@ -57,7 +57,15 @@ export class TenantsService {
         },
       });
 
-      const permissions = await tx.permission.findMany({ select: { id: true } });
+      // CRÍTICO: exclui as permissões `platform:*` (backoffice da própria plataforma) da
+      // concessão automática. Sem este filtro, todo signup público (que ninguém aqui
+      // controla) ganharia acesso ao backoffice de tenants — a role "Admin" aqui é "acesso
+      // total à própria clínica", não "acesso total ao catálogo inteiro". A clínica-plataforma
+      // só recebe essa permissão via `prisma/bootstrap-platform.ts`, nunca por aqui.
+      const permissions = await tx.permission.findMany({
+        where: { key: { not: { startsWith: 'platform:' } } },
+        select: { id: true },
+      });
       if (permissions.length > 0) {
         await tx.rolePermission.createMany({
           data: permissions.map(({ id }) => ({ roleId: role.id, permissionId: id })),
