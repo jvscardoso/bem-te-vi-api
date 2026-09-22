@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { TenantsService } from './tenants.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import type { DnsTxtResolver } from './dns-txt-resolver.js';
 
 function setup(tenant = { defaultAppointmentDurationMinutes: 30, minAppointmentDurationMinutes: 5 }) {
   const prisma = {
@@ -10,7 +11,12 @@ function setup(tenant = { defaultAppointmentDurationMinutes: 30, minAppointmentD
     },
     user: { count: vi.fn(async () => 0) },
   };
-  const service = new TenantsService(prisma as unknown as PrismaService);
+  // Não usado por estes testes (duração de atendimento); só para satisfazer o construtor.
+  const dnsTxtResolver = { resolveTxt: vi.fn() };
+  const service = new TenantsService(
+    prisma as unknown as PrismaService,
+    dnsTxtResolver as unknown as DnsTxtResolver,
+  );
   return { prisma, service };
 }
 

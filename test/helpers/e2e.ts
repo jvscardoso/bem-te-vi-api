@@ -5,6 +5,7 @@ import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { DnsTxtResolver } from '../../src/tenants/dns-txt-resolver.js';
 
 export const PASSWORD = 'Senha@12345';
 
@@ -35,8 +36,11 @@ export interface TestTenant extends TestUser {
 // Sobe a aplicação com a mesma configuração de validação do main.ts.
 // O rate limit é desligado: um storage que nunca acumula hits evita 429 na suíte
 // sem mexer no guard (registrado via APP_GUARD).
-export async function createTestApp(): Promise<TestApp> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+// `dnsTxtResolver`: só quem testa verificação de domínio precisa de um dublê controlável
+// (não dá para apontar um TXT real num domínio de teste); os demais arquivos usam o real,
+// que nunca chega a ser chamado por eles.
+export async function createTestApp(opts: { dnsTxtResolver?: DnsTxtResolver } = {}): Promise<TestApp> {
+  const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ThrottlerStorage)
     .useValue({
       increment: async () => ({
@@ -45,8 +49,11 @@ export async function createTestApp(): Promise<TestApp> {
         isBlocked: false,
         timeToBlockExpire: 0,
       }),
-    })
-    .compile();
+    });
+  if (opts.dnsTxtResolver) {
+    builder.overrideProvider(DnsTxtResolver).useValue(opts.dnsTxtResolver);
+  }
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(

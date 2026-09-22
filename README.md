@@ -110,10 +110,16 @@ Implementação: os ids da página saem de SQL parametrizado (usa a extensão `u
 
 - **Configurar (admin da clínica, `tenant:manage`):** `PATCH /tenants/:id/branding` com `tradeName`, `logoUrl`, `primaryColor`, `secondaryColor`. Envio parcial; `null` limpa o campo. Cores `#RRGGBB`; `logoUrl` só `https`. `customDomain` (em `PATCH /tenants/:id` ou no signup) é validado como domínio e normalizado para minúsculas.
 - **Resolver a marca antes do login (público):** `GET /public/branding?host=<host do frontend>` → `{ name, tradeName, logoUrl, primaryColor, secondaryColor }`. O frontend chama com o `window.location.host` para tematizar a tela de login.
-  - Domínio próprio: casa por igualdade exata com `customDomain`.
+  - Domínio próprio: casa por igualdade exata com `customDomain`, e só se ele estiver **verificado** (ver abaixo). Um domínio reivindicado mas não verificado nunca resolve.
   - Subdomínio: `<sub>.<APP_BASE_DOMAIN>` (defina `APP_BASE_DOMAIN`, ex.: `bemtevi.com.br`); sem ele, um host sem ponto é tratado como o próprio subdomínio (dev: `?host=clinica-a`).
-  - Porta, maiúsculas e ponto final são ignorados. Clínica inexistente ou suspensa → `404`. Só campos de marca são expostos (nada de id, status ou configurações). Resposta com `Cache-Control: public, max-age=60`.
-- **Limitação conhecida:** o domínio próprio não passa por verificação de posse (DNS/TXT). Quem fizer signup pode registrar o `customDomain` de terceiros e passa a controlar a marca exibida nesse host. Antes de liberar domínio próprio em produção, exigir verificação. Upload de logo também não existe ainda (só a URL).
+  - Porta, maiúsculas e ponto final são ignorados. Clínica inexistente, suspensa ou com domínio não verificado → `404`. Só campos de marca são expostos (nada de id, status ou configurações). Resposta com `Cache-Control: public, max-age=60`.
+- **Verificação de domínio próprio (prova de posse por DNS):** ao definir `customDomain`, a clínica ganha um desafio TXT que precisa colocar no próprio DNS antes que esse domínio controle a marca exibida.
+  - `GET /tenants/:id/domain` (`tenant:manage`) → `{ domain, verified, verifiedAt, record: { type: "TXT", name: "_bemtevi-challenge.<domain>", value } }`.
+  - `POST /tenants/:id/domain/verify` (`tenant:manage`) consulta o DNS agora; sempre `200`, com `verified: false` enquanto o registro não propagou (não é erro, é um estado normal de "ainda não" — o cliente chama de novo mais tarde). Uma vez verificado, fica assim até o domínio mudar de valor.
+  - Trocar `customDomain` gera um novo desafio e zera a verificação (o token antigo não vale mais); reenviar o mesmo valor não mexe numa verificação já feita; remover (`null`) libera o domínio para outro tenant reivindicar.
+  - O nome do subdomínio do desafio (`_bemtevi-challenge`, não o apex do domínio do cliente) evita colidir com SPF/DKIM que o domínio já possa ter — convenção igual à da Vercel (`_vercel`).
+  - Sem verificação de posse antes disso, qualquer signup podia declarar o domínio de um terceiro e passava a controlar a marca exibida nesse host (risco de phishing) — era a limitação conhecida documentada aqui antes; a lacuna está fechada, mas o domínio ainda não expira se nunca for verificado (squatting de longo prazo é um problema separado, não resolvido).
+  - Upload de logo ainda não existe (só a URL, que precisa ser `https`).
 
 ## Agenda
 
@@ -210,6 +216,7 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `patients.e2e-spec.ts` — CRUD, soft delete e restauração, CPF (normalização e unique), anamnese, isolamento.
   - `patients-search.e2e-spec.ts` — busca por nome/sobrenome/CPF (acentos, ordem, parcial), curingas e SQL como texto, paginação (páginas sem repetir/pular, limites, validação) e isolamento entre tenants.
   - `branding.e2e-spec.ts` — `PATCH` de branding (validações), `customDomain` e resolução pública por host.
+  - `domain-verification.e2e-spec.ts` — desafio TXT, verificação (certo/errado/múltiplos registros/DNS fora do ar), troca/remoção de domínio, permissões e isolamento. Usa um `DnsTxtResolver` falso injetado via `createTestApp({ dnsTxtResolver })` (não dá para provar o caminho feliz com DNS real num teste automatizado).
   - `appointments-filters.e2e-spec.ts` — janela `from`/`to` por sobreposição (em andamento, envolvente, bordas exatas) e filtro por `status` (lista, repetido, vazio, inválido, combinações).
   - `appointments-pagination.e2e-spec.ts` — paginação da agenda: páginas sem repetir/pular, desempate estável (5 agendamentos no mesmo horário), total conforme filtros, limites e validação.
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).

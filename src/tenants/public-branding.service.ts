@@ -42,7 +42,12 @@ export class PublicBrandingService {
   // sem APP_BASE_DOMAIN configurado (ou com um host sem ponto, como em dev), o próprio host
   // é tratado como subdomínio.
   private candidates(host: string): Prisma.TenantWhereInput[] {
-    const candidates: Prisma.TenantWhereInput[] = [{ customDomain: host }];
+    // Domínio próprio só resolve depois de comprovado por DNS (ver TenantsService.verifyDomain).
+    // Sem isso, quem reivindica o domínio de outra empresa no signup controlaria a marca
+    // exibida nesse host antes mesmo de provar que é dono dele.
+    const candidates: Prisma.TenantWhereInput[] = [
+      { customDomain: host, customDomainVerifiedAt: { not: null } },
+    ];
 
     const baseDomain = this.config.get<string>('APP_BASE_DOMAIN')?.trim().toLowerCase();
     if (baseDomain && host.endsWith(`.${baseDomain}`)) {

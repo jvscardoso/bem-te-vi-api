@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, HttpCode, HttpStatus } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { TenantsService } from './tenants.service.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
@@ -40,5 +40,21 @@ export class TenantsController {
   @Patch(':id/branding')
   updateBranding(@Param('id') id: string, @Body() dto: UpdateTenantBrandingDto) {
     return this.tenantsService.updateBranding(id, dto);
+  }
+
+  // Instruções (nome/valor do TXT) para o cliente provar que é dono do `customDomain`.
+  @RequirePermissions('tenant:manage')
+  @Get(':id/domain')
+  getDomainVerification(@Param('id') id: string) {
+    return this.tenantsService.getDomainVerification(id);
+  }
+
+  // Consulta o DNS agora; idempotente, sem corpo. 200 mesmo quando ainda não propagou
+  // (a resposta descreve o estado, `verified: false` não é um erro de requisição).
+  @RequirePermissions('tenant:manage')
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/domain/verify')
+  verifyDomain(@Param('id') id: string) {
+    return this.tenantsService.verifyDomain(id);
   }
 }

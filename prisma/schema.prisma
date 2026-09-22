@@ -30,6 +30,12 @@ model Tenant {
   name          String       @db.VarChar(150)
   subdomain     String       @unique @db.VarChar(63)
   customDomain  String?      @unique @map("custom_domain") @db.VarChar(255)
+  // Prova de posse do domínio próprio (registro TXT). Token e verificação são resetados
+  // sempre que customDomain muda; sem token/verifiedAt, é como se não tivesse domínio nenhum
+  // para fins de resolução pública de marca — só um domínio verificado controla o que aparece
+  // nesse host (ver PublicBrandingService).
+  customDomainVerificationToken String?   @map("custom_domain_verification_token") @db.VarChar(64)
+  customDomainVerifiedAt        DateTime? @map("custom_domain_verified_at")
   status        TenantStatus @default(active)
   // Duração do atendimento usada quando o agendamento não informa o fim e o profissional
   // não tem duração própria; e o piso aplicado a qualquer agendamento da clínica

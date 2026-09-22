@@ -1,3 +1,4 @@
+import { DnsTxtResolver } from '../src/tenants/dns-txt-resolver.js';
 import {
   PASSWORD,
   cleanupTenants,
@@ -10,12 +11,23 @@ import {
   type TestTenant,
 } from './helpers/e2e.js';
 
+// Dublê controlável: só o suficiente para completar a verificação de um domínio próprio
+// dentro deste arquivo (a suíte dedicada é domain-verification.e2e-spec.ts).
+class FakeDnsTxtResolver extends DnsTxtResolver {
+  records = new Map<string, string[]>();
+
+  override async resolveTxt(hostname: string): Promise<string[]> {
+    return this.records.get(hostname) ?? [];
+  }
+}
+
 const BASE_DOMAIN = 'bemtevi.test';
 const PUBLIC_KEYS = ['logoUrl', 'name', 'primaryColor', 'secondaryColor', 'tradeName'];
 
 // Roda contra o Postgres do .env (docker compose up -d + migrate + seed).
 describe('Branding / whitelabel (e2e)', () => {
   let ctx: TestApp;
+  let dns: FakeDnsTxtResolver;
   let a: TestTenant;
   let b: TestTenant;
   let subA: string;
@@ -29,10 +41,20 @@ describe('Branding / whitelabel (e2e)', () => {
   const subdomainOf = async (t: TestTenant) =>
     (await ctx.prisma.tenant.findUniqueOrThrow({ where: { id: t.tenantId } })).subdomain;
 
+  // Domínio próprio só resolve publicamente depois de comprovado por DNS
+  // (ver domain-verification.e2e-spec.ts para a suíte completa dessa regra).
+  const verifyCustomDomain = async (t: TestTenant) => {
+    const { record } = (await ctx.http().get(`/tenants/${t.tenantId}/domain`).set(t.auth).expect(200)).body;
+    dns.records.set(record.name, [record.value]);
+    const res = await ctx.http().post(`/tenants/${t.tenantId}/domain/verify`).set(t.auth).expect(200);
+    expect(res.body.verified).toBe(true);
+  };
+
   beforeAll(async () => {
     // O ConfigService lê process.env no momento do uso; precisa estar definido antes de subir.
     process.env.APP_BASE_DOMAIN = BASE_DOMAIN;
-    ctx = await createTestApp();
+    dns = new FakeDnsTxtResolver();
+    ctx = await createTestApp({ dnsTxtResolver: dns });
     a = await signupTenant(ctx.http, 'br-a');
     b = await signupTenant(ctx.http, 'br-b');
     subA = await subdomainOf(a);
@@ -210,9 +232,14 @@ describe('Branding / whitelabel (e2e)', () => {
       await publicBranding(`${subA}.${BASE_DOMAIN}.`).expect(200);
     });
 
-    it('resolve pelo domínio próprio', async () => {
+    it('domínio próprio só resolve depois de verificado por DNS', async () => {
       const own = `marca-${uniq()}.exemplo.com.br`;
       await ctx.http().patch(`/tenants/${a.tenantId}`).set(a.auth).send({ customDomain: own }).expect(200);
+
+      // Reivindicado, mas ainda não comprovado: não deve controlar o que aparece nesse host.
+      await publicBranding(own).expect(404);
+
+      await verifyCustomDomain(a);
 
       const res = await publicBranding(own).expect(200);
       expect(res.body.tradeName).toBe('Clínica Sorriso');
