@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Appointment, AppointmentStatus, Prisma } from '@prisma/client';
+import type { AppointmentStatus, Prisma } from '@prisma/client';
 import { pageOf, type Page } from '../common/pagination/page.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateAppointmentDto } from './dto/create-appointment.dto.js';
@@ -12,6 +12,15 @@ import { UpdateAppointmentDto } from './dto/update-appointment.dto.js';
 import { FindAppointmentsQueryDto } from './dto/find-appointments-query.dto.js';
 
 const MS_PER_MINUTE = 60_000;
+
+// Nomes de paciente e profissional em toda resposta: sem isso a agenda precisaria de uma
+// chamada extra por item só para exibir quem é quem.
+const APPOINTMENT_INCLUDE = {
+  patient: { select: { id: true, fullName: true } },
+  professional: { select: { id: true, name: true } },
+} as const satisfies Prisma.AppointmentInclude;
+
+type AppointmentView = Prisma.AppointmentGetPayload<{ include: typeof APPOINTMENT_INCLUDE }>;
 
 // Só estes status ocupam a agenda do profissional.
 const ACTIVE_STATUSES: AppointmentStatus[] = ['scheduled', 'confirmed', 'completed'];
@@ -58,13 +67,14 @@ export class AppointmentsService {
           endsAt: end,
           notes: dto.notes,
         },
+        include: APPOINTMENT_INCLUDE,
       });
     });
   }
 
   // Ordem por horário com desempate por id: dois agendamentos no mesmo horário (profissionais
   // diferentes) não podem trocar de lugar entre páginas, senão a paginação repete ou pula.
-  async findAll(tenantId: string, query: FindAppointmentsQueryDto): Promise<Page<Appointment>> {
+  async findAll(tenantId: string, query: FindAppointmentsQueryDto): Promise<Page<AppointmentView>> {
     const { page, pageSize } = query;
     const from = query.from ? new Date(query.from) : undefined;
     const to = query.to ? new Date(query.to) : undefined;
@@ -86,6 +96,7 @@ export class AppointmentsService {
     const [data, total] = await Promise.all([
       this.prisma.appointment.findMany({
         where,
+        include: APPOINTMENT_INCLUDE,
         orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -96,7 +107,10 @@ export class AppointmentsService {
   }
 
   async findOne(tenantId: string, id: string) {
-    const appointment = await this.prisma.appointment.findFirst({ where: { id, tenantId } });
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id, tenantId },
+      include: APPOINTMENT_INCLUDE,
+    });
     if (!appointment) {
       throw new NotFoundException(`Agendamento ${id} não encontrado`);
     }
@@ -153,7 +167,7 @@ export class AppointmentsService {
 
     const occupiesAgenda = ACTIVE_STATUSES.includes(dto.status ?? existing.status);
     if (!rescheduled || !occupiesAgenda) {
-      return this.prisma.appointment.update({ where: { id }, data });
+      return this.prisma.appointment.update({ where: { id }, data, include: APPOINTMENT_INCLUDE });
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -165,7 +179,7 @@ export class AppointmentsService {
         end,
         id,
       );
-      return tx.appointment.update({ where: { id }, data });
+      return tx.appointment.update({ where: { id }, data, include: APPOINTMENT_INCLUDE });
     });
   }
 

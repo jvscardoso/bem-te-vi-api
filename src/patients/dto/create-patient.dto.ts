@@ -23,7 +23,7 @@ export class CreatePatientDto {
 
   @IsOptional()
   @IsDateString()
-  birthDate?: string;
+  birthDate?: string | null;
 
   @IsOptional()
   @IsString()
@@ -38,7 +38,7 @@ export class CreatePatientDto {
   // Formato livre — a forma varia por tenant (ex.: campos de endereço distintos).
   @IsOptional()
   @IsObject()
-  address?: Record<string, unknown>;
+  address?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsString()

@@ -31,6 +31,17 @@ export class RolesService {
     });
   }
 
+  // As `platform:*` só aparecem para quem já as tem: para uma clínica elas nunca são
+  // concedíveis (assertCanGrant recusaria) e nem fazem sentido no editor de papéis dela.
+  listPermissions(actor: AuthenticatedUser) {
+    const seesPlatform = actor.permissions.some((key) => key.startsWith('platform:'));
+    return this.prisma.permission.findMany({
+      where: seesPlatform ? undefined : { key: { not: { startsWith: 'platform:' } } },
+      select: { id: true, key: true, description: true },
+      orderBy: { key: 'asc' },
+    });
+  }
+
   // Ordem por nome com desempate por id, para as páginas não repetirem nem pularem papéis.
   async findAll(tenantId: string, { page, pageSize }: ListRolesQueryDto) {
     const where = { tenantId };

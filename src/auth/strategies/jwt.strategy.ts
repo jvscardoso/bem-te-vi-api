@@ -28,6 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         tenantId: true,
         roleId: true,
         status: true,
+        passwordVersion: true,
         tenant: { select: { status: true } },
         role: { select: { permissions: { select: { permission: { select: { key: true } } } } } },
       },
@@ -35,6 +36,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user || user.status !== 'active' || user.tenant.status !== 'active') {
       throw new UnauthorizedException();
+    }
+    // Token de antes da última troca/redefinição de senha.
+    if ((payload.pwv ?? 0) !== user.passwordVersion) {
+      throw new UnauthorizedException('Sessão encerrada pela troca de senha; faça login novamente');
     }
 
     return {

@@ -13,6 +13,7 @@ import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { pageOf } from '../common/pagination/page.js';
+import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
 
 const SALT_ROUNDS = 12;
 
@@ -48,7 +49,7 @@ export class UsersService {
         passwordHash,
         defaultAppointmentDurationMinutes: dto.defaultAppointmentDurationMinutes,
       },
-      omit: { passwordHash: true },
+      omit: USER_SECRET_FIELDS,
     });
   }
 
@@ -58,7 +59,7 @@ export class UsersService {
     const [data, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        omit: { passwordHash: true },
+        omit: USER_SECRET_FIELDS,
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -71,7 +72,7 @@ export class UsersService {
   async findOne(tenantId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId },
-      omit: { passwordHash: true },
+      omit: USER_SECRET_FIELDS,
     });
     if (!user) {
       throw new NotFoundException(`Usuário ${id} não encontrado`);
@@ -107,12 +108,58 @@ export class UsersService {
         this.policy.assertCanGrant(actor, newKeys);
       }
 
-      return db.user.update({ where: { id }, data: dto, omit: { passwordHash: true } });
+      return db.user.update({ where: { id }, data: dto, omit: USER_SECRET_FIELDS });
     };
 
     // Mudar papel ou status pode tirar o último administrador: nesse caso vale a guarda.
     const changesAccess = dto.roleId !== undefined || dto.status !== undefined;
     return changesAccess ? this.policy.withAdminGuard(tenantId, write) : write(this.prisma);
+  }
+
+  // Redefinição pelo administrador (usuário esqueceu a senha, conta comprometida). Derruba as
+  // sessões abertas do alvo (passwordVersion, ver JwtStrategy). Para a própria senha, o
+  // caminho é PATCH /auth/me/password, que exige a senha atual — senão um token roubado de um
+  // admin bastaria para trocar a senha dele e tomar a conta.
+  async resetPassword(tenantId: string, actor: AuthenticatedUser, id: string, password: string) {
+    if (id === actor.userId) {
+      throw new BadRequestException(
+        'Para trocar a própria senha, use PATCH /auth/me/password (exige a senha atual)',
+      );
+    }
+    const target = await this.prisma.user.findFirst({ where: { id, tenantId }, select: { roleId: true } });
+    if (!target) {
+      throw new NotFoundException(`Usuário ${id} não encontrado`);
+    }
+    const targetKeys = (await this.policy.roleKeys(this.prisma, tenantId, target.roleId)) ?? [];
+    this.policy.assertCanManage(actor, targetKeys, 'usuário');
+
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash: await hash(password, SALT_ROUNDS), passwordVersion: { increment: 1 } },
+    });
+  }
+
+  // Quem pode ser escolhido como profissional num agendamento: usuários ativos (é o mesmo
+  // critério que AppointmentsService aplica). Campos mínimos, para liberar a quem só tem
+  // acesso à agenda sem expor email/status/papel. A duração efetiva evita que o cliente
+  // precise ler as configurações da clínica (que exigem tenant:manage) para prever o fim.
+  async findProfessionals(tenantId: string) {
+    const [tenant, users] = await Promise.all([
+      this.prisma.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { defaultAppointmentDurationMinutes: true },
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, status: 'active' },
+        select: { id: true, name: true, defaultAppointmentDurationMinutes: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      }),
+    ]);
+    return users.map((user) => ({
+      ...user,
+      effectiveAppointmentDurationMinutes:
+        user.defaultAppointmentDurationMinutes ?? tenant.defaultAppointmentDurationMinutes,
+    }));
   }
 
   updateOwnAppointmentSettings(

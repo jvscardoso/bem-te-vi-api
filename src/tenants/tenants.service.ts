@@ -7,6 +7,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
 import { DnsTxtResolver } from './dns-txt-resolver.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
@@ -80,7 +81,7 @@ export class TenantsService {
           email,
           passwordHash,
         },
-        omit: { passwordHash: true },
+        omit: USER_SECRET_FIELDS,
       });
 
       return { tenant, role: { id: role.id, name: role.name }, owner: ownerUser };

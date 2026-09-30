@@ -91,6 +91,11 @@ model User {
   name          String     @db.VarChar(150)
   email         String     @unique @db.VarChar(150)
   passwordHash  String     @map("password_hash")
+  // Incrementada a cada troca/redefinição de senha e gravada no token (`pwv`); token com
+  // versão diferente é recusado (ver JwtStrategy). Assim trocar a senha derruba as sessões
+  // abertas — inclusive a de quem roubou a senha antiga. Contador em vez de data porque o
+  // `iat` do JWT tem resolução de segundos e deixaria uma janela na comparação.
+  passwordVersion Int @default(0) @map("password_version")
   status        UserStatus @default(active)
   // Sobrescreve a duração padrão da clínica para os agendamentos deste profissional.
   defaultAppointmentDurationMinutes Int? @map("default_appointment_duration_minutes")

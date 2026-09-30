@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Charge, ChargeStatus, Prisma } from '@prisma/client';
+import type { ChargeStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { pageOf } from '../common/pagination/page.js';
 import { CreateChargeDto } from './dto/create-charge.dto.js';
@@ -15,6 +15,17 @@ import { BillingSummaryQueryDto } from './dto/billing-summary-query.dto.js';
 
 // Campos "de conteúdo" de uma cobrança: só editáveis enquanto pendente e sem pagamento algum.
 const CONTENT_FIELDS = ['patientId', 'appointmentId', 'description', 'amountCents', 'dueDate'] as const;
+
+// Nome do paciente em toda resposta de cobrança (a listagem é inútil só com o id).
+const CHARGE_INCLUDE = {
+  patient: { select: { id: true, fullName: true } },
+} as const satisfies Prisma.ChargeInclude;
+
+const PAYMENT_INCLUDE = {
+  recordedBy: { select: { id: true, name: true } },
+} as const satisfies Prisma.PaymentInclude;
+
+type ChargeWithPatient = Prisma.ChargeGetPayload<{ include: typeof CHARGE_INCLUDE }>;
 
 @Injectable()
 export class BillingService {
@@ -35,8 +46,9 @@ export class BillingService {
         dueDate: new Date(dto.dueDate),
         createdByUserId: actorId,
       },
+      include: CHARGE_INCLUDE,
     });
-    return this.withComputed(charge);
+    return this.withComputed(charge, 0);
   }
 
   async findAllCharges(tenantId: string, query: ListChargesQueryDto) {
@@ -51,22 +63,42 @@ export class BillingService {
     const [data, total] = await Promise.all([
       this.prisma.charge.findMany({
         where,
+        include: CHARGE_INCLUDE,
         orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
       this.prisma.charge.count({ where }),
     ]);
-    return pageOf(data.map((charge) => this.withComputed(charge)), total, page, pageSize);
+
+    // Total pago de cada cobrança da página numa consulta só (saldo e "parcialmente paga"
+    // sem o cliente abrir o detalhe de cada uma).
+    const sums = data.length
+      ? await this.prisma.payment.groupBy({
+          by: ['chargeId'],
+          where: { chargeId: { in: data.map((charge) => charge.id) } },
+          _sum: { amountCents: true },
+        })
+      : [];
+    const paidById = new Map(sums.map((row) => [row.chargeId, row._sum.amountCents ?? 0]));
+
+    return pageOf(
+      data.map((charge) => this.withComputed(charge, paidById.get(charge.id) ?? 0)),
+      total,
+      page,
+      pageSize,
+    );
   }
 
   async findOneCharge(tenantId: string, id: string) {
     const charge = await this.getChargeOrThrow(tenantId, id);
     const payments = await this.prisma.payment.findMany({
       where: { chargeId: id },
+      include: PAYMENT_INCLUDE,
       orderBy: { paidAt: 'desc' },
     });
-    return { ...this.withComputed(charge), payments };
+    const paidCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    return { ...this.withComputed(charge, paidCents), payments };
   }
 
   async updateCharge(tenantId: string, id: string, dto: UpdateChargeDto) {
@@ -93,8 +125,9 @@ export class BillingService {
     const updated = await this.prisma.charge.update({
       where: { id },
       data: { ...dto, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined },
+      include: CHARGE_INCLUDE,
     });
-    return this.withComputed(updated);
+    return this.withComputed(updated, paidCents);
   }
 
   // DELETE cancela (não apaga) — mesma convenção da agenda.
@@ -138,6 +171,7 @@ export class BillingService {
           notes: dto.notes,
           recordedByUserId: actorId,
         },
+        include: PAYMENT_INCLUDE,
       });
 
       if (dto.amountCents === remaining) {
@@ -150,7 +184,11 @@ export class BillingService {
 
   async listPayments(tenantId: string, chargeId: string) {
     await this.getChargeOrThrow(tenantId, chargeId);
-    return this.prisma.payment.findMany({ where: { chargeId }, orderBy: { paidAt: 'desc' } });
+    return this.prisma.payment.findMany({
+      where: { chargeId },
+      include: PAYMENT_INCLUDE,
+      orderBy: { paidAt: 'desc' },
+    });
   }
 
   // "Pago no período" olha a data do pagamento; os demais são o total atual (não teria
@@ -194,8 +232,11 @@ export class BillingService {
     };
   }
 
-  private async getChargeOrThrow(tenantId: string, id: string): Promise<Charge> {
-    const charge = await this.prisma.charge.findFirst({ where: { id, tenantId } });
+  private async getChargeOrThrow(tenantId: string, id: string): Promise<ChargeWithPatient> {
+    const charge = await this.prisma.charge.findFirst({
+      where: { id, tenantId },
+      include: CHARGE_INCLUDE,
+    });
     if (!charge) {
       throw new NotFoundException(`Cobrança ${id} não encontrada`);
     }
@@ -236,9 +277,15 @@ export class BillingService {
     }
   }
 
-  private withComputed(charge: Charge) {
+  private withComputed(charge: ChargeWithPatient, paidCents: number) {
     const today = new Date(new Date().toISOString().slice(0, 10));
-    return { ...charge, isOverdue: charge.status === 'pending' && charge.dueDate < today };
+    return {
+      ...charge,
+      isOverdue: charge.status === 'pending' && charge.dueDate < today,
+      paidCents,
+      // Cancelada não deve nada, mesmo que o valor não tenha sido pago.
+      balanceCents: charge.status === 'cancelled' ? 0 : charge.amountCents - paidCents,
+    };
   }
 
   // O FK do banco só garante que o paciente existe, não que é deste tenant nem que está ativo.

@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
+import { ResetUserPasswordDto } from './dto/reset-user-password.dto.js';
 import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.dto.js';
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
@@ -52,5 +53,16 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     return this.usersService.update(tenantId, actor, id, dto);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Patch(':id/password')
+  resetPassword(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ResetUserPasswordDto,
+  ) {
+    return this.usersService.resetPassword(tenantId, actor, id, dto.password);
   }
 }

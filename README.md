@@ -91,6 +91,7 @@ Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/
 - CRUD sob `/tenants/:tenantId/patients`; `DELETE` é soft delete (o registro e as fichas de anamnese continuam no banco, só somem das leituras).
 - **CPF guardado só com dígitos (11).** Aceita com ou sem pontuação na entrada (`123.456.789-01` e `12345678901` são o mesmo CPF) e sempre volta sem pontuação; o frontend formata para exibir. `null` limpa o campo. Sem essa normalização a unique e a busca por CPF não seriam confiáveis.
 - **CPF único por tenant, inclusive entre removidos.** O CPF de um paciente removido continua reservado, para não duplicar cadastro/prontuário. Tentar cadastrar (ou trocar para) esse CPF devolve `409` com `removedPatientId`, para o cliente oferecer "restaurar".
+- No `PATCH`, `null` limpa qualquer campo opcional (inclusive `birthDate` e `address`, que precisam de tradução para o Prisma — `address` nulo vira `Prisma.DbNull`).
 - **Restauração:** `GET /patients/removed` lista os removidos e `POST /patients/:id/restore` desfaz o soft delete (dados e anamnese voltam intactos). Ambos exigem `patients:write`.
 
 ### Listagem, busca e paginação
@@ -170,6 +171,7 @@ Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppo
 - Ao remarcar só o início, a duração original é mantida.
 - Transições de status: `scheduled → confirmed | completed | cancelled | no_show`; `confirmed → completed | cancelled | no_show`. `completed`, `cancelled` e `no_show` são finais: só as observações podem mudar.
 - `DELETE` cancela o agendamento (não apaga).
+- Toda resposta traz `patient: { id, fullName }` e `professional: { id, name }`, para a agenda não precisar de uma chamada extra por item só para exibir nomes.
 
 **Listagem, filtros e paginação.** `GET /tenants/:tenantId/appointments`:
 
@@ -192,11 +194,14 @@ Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" 
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
 - `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
 - `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions }` no handler.
-- Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` contra força bruta.
+- `GET /auth/me` devolve isso mais `name`, `email` e `role: { id, name }` (para o cabeçalho do app, sem depender do que o cliente guardou no login).
+- Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` e `PATCH /auth/me/password` contra força bruta.
 - `helmet` aplica cabeçalhos de segurança padrão (CSP, HSTS, etc.) em todas as respostas.
 - `RequestLoggerMiddleware` loga método/rota/status/duração/IP de cada request (auditoria básica).
 
 **Estado sempre fresco.** O token só prova identidade: a cada request o `JwtStrategy` relê do banco o usuário, o status do tenant e as permissões do papel (uma query por PK). Por isso desativar um usuário, suspender um tenant ou mudar as permissões de um papel tem efeito imediato (401/403), sem esperar o token expirar nem exigir novo login. Login também é recusado (401, mesma mensagem genérica) para usuário desativado ou tenant suspenso.
+
+**Senha.** `PATCH /auth/me/password` (`{ currentPassword, newPassword }`) troca a própria senha e exige a atual — um token roubado sozinho não toma a conta; senha atual errada dá `400` (não `401`, que o cliente interpretaria como sessão inválida). `PATCH /tenants/:tenantId/users/:id/password` (`users:manage`, `{ password }`, `204`) é a redefinição pelo admin: não vale para si mesmo (esse caminho não pede a senha atual) nem para usuário "acima" do ator. As duas **derrubam todas as sessões** do usuário: `User.passwordVersion` é incrementada e vai no token (`pwv`); token com versão diferente leva `401`. A troca pelo próprio usuário devolve um `accessToken` novo, para ele não ser deslogado junto. Um contador, e não uma data, porque o `iat` do JWT tem resolução de segundos e deixaria uma janela na comparação; tokens emitidos antes do campo existir não têm `pwv` e valem como versão 0. "Esqueci minha senha" e convite por email ficam para quando houver envio de email.
 
 **Suspensão de tenant** é ação da plataforma: `status` não é aceito em `PATCH /tenants/:id`, para o admin da clínica não conseguir suspender (ou reativar) o próprio tenant. Enquanto não existir um painel/papel de plataforma, altera-se direto no banco.
 
@@ -212,6 +217,10 @@ Centralizadas em `AccessPolicyService` (`src/access`), usado por `UsersService` 
 **Sempre existe um administrador ativo** (409). "Administrador" é quem está ativo e tem um papel com `users:manage`, `roles:manage` e `tenant:manage` (definido pelas permissões, não pelo nome do papel). Desativar o último, trocar o papel dele ou tirar essas permissões do papel é recusado e desfeito. A checagem roda numa transação com advisory lock por tenant, para dois admins não se rebaixarem ao mesmo tempo. Um tenant que já estava sem administrador não é bloqueado por isso.
 
 Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes vazava erro de FK); o email é gravado em minúsculas também na edição.
+
+**Catálogo de permissões.** `GET /permissions` (`roles:manage`) lista `{ id, key, description }` para o editor de papéis montar `permissionIds`. As `platform:*` só aparecem para quem já tem alguma (para uma clínica elas nunca são concedíveis).
+
+**Lista de profissionais.** `GET /tenants/:tenantId/professionals` exige só `appointments:read`: quem agenda (ex.: recepção) precisa escolher o profissional sem poder gerenciar usuários. Devolve só usuários ativos (mesmo critério da agenda) com `{ id, name, defaultAppointmentDurationMinutes, effectiveAppointmentDurationMinutes }` — sem email/status/papel. A duração efetiva (própria ou da clínica) existe porque ler as configurações da clínica exige `tenant:manage`.
 
 **Listagem e paginação.** `GET /tenants/:tenantId/users` e `GET /tenants/:tenantId/roles` são paginados (mesmo padrão de pacientes/agenda: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" } }`, `page` padrão `1`, `pageSize` padrão `20` e máximo `100`; parâmetro inválido ou desconhecido → `400`). Ordenados por nome, com desempate por id. Sem busca por texto por enquanto (`q`) — são listas tipicamente pequenas por clínica; se isso mudar, adicionar do mesmo jeito que em pacientes.
 
@@ -247,6 +256,7 @@ Cobrança e pagamento nativos — nada disto depende de serviço externo. **Emis
 - **"Atrasada" não é status, é calculado:** `isOverdue` na resposta e o filtro `status=overdue` (mutuamente exclusivo com `status=pending` — uma cobrança pendente cai em exatamente um dos dois) comparam `dueDate` com hoje, sem precisar de job agendado.
 - Uma cobrança com **qualquer** pagamento registrado (mesmo parcial) não pode mais ser editada nem cancelada — só ler.
 - Listagem paginada com filtros `patientId`, `status` (`pending`/`overdue`/`paid`/`cancelled`) e `from`/`to` (janela de vencimento).
+- Toda resposta traz `patient: { id, fullName }`, `paidCents` (soma dos pagamentos; na listagem, um `groupBy` só para a página inteira) e `balanceCents` (saldo devedor; `0` se cancelada). Pagamentos trazem `recordedBy: { id, name }`.
 
 **Pagamento (`Payment`)** — `POST /tenants/:tenantId/charges/:id/payments`: parcial ou total, soma nunca passa do valor da cobrança (rejeitado com o saldo devedor exato na mensagem). Ao completar o valor, a cobrança vira `paid` sozinha. Concorrência tratada com transação + advisory lock por cobrança — mesmo padrão (e mesmo motivo) do lock de sobreposição de horário na agenda: sem ele, pagamentos simultâneos poderiam somar mais que o valor devido.
 
@@ -259,8 +269,8 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 | Job | O que valida |
 |---|---|
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
-| `unit` | `npm test` (58 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (224 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `unit` | `npm test` (82 testes, sem banco) |
+| `e2e` | `npm run test:e2e` (357 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -300,3 +310,5 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `appointments.e2e-spec.ts` — duração, conflitos, remarcação, status, filtros e **concorrência** (requisições simultâneas provam o advisory lock; sem ele os testes de corrida falham).
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
   - `account-rules.e2e-spec.ts` — escalada de privilégio (usuários e papéis), último administrador e corrida entre admins (sem o lock por tenant os testes de concorrência falham).
+  - `passwords.e2e-spec.ts` — troca da própria senha (senha atual errada dá 400, token novo devolvido) e redefinição pelo admin (não para si, não para quem está acima), e que ambas derrubam as sessões abertas do usuário.
+  - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

@@ -20,14 +20,7 @@ export class PatientsService {
 
   async create(tenantId: string, dto: CreatePatientDto) {
     await this.assertCpfAvailable(tenantId, dto.cpf);
-    return this.prisma.patient.create({
-      data: {
-        ...dto,
-        tenantId,
-        birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-        address: dto.address as Prisma.InputJsonValue,
-      },
-    });
+    return this.prisma.patient.create({ data: { ...this.toData(dto), tenantId } });
   }
 
   findAll(tenantId: string, query: ListPatientsQueryDto) {
@@ -51,14 +44,18 @@ export class PatientsService {
   async update(tenantId: string, id: string, dto: UpdatePatientDto) {
     await this.findOne(tenantId, id);
     await this.assertCpfAvailable(tenantId, dto.cpf, id);
-    return this.prisma.patient.update({
-      where: { id },
-      data: {
-        ...dto,
-        birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-        address: dto.address as Prisma.InputJsonValue,
-      },
-    });
+    return this.prisma.patient.update({ where: { id }, data: this.toData(dto) });
+  }
+
+  // `null` limpa o campo (contrato de todo PATCH). Precisa de tradução em dois casos:
+  // data vira Date, e Json nulo no Prisma exige Prisma.DbNull (um `null` cru é recusado).
+  private toData<T extends UpdatePatientDto>(dto: T) {
+    const { birthDate, address, ...rest } = dto;
+    return {
+      ...rest,
+      birthDate: birthDate === null ? null : birthDate ? new Date(birthDate) : undefined,
+      address: address === null ? Prisma.DbNull : (address as Prisma.InputJsonValue | undefined),
+    };
   }
 
   async remove(tenantId: string, id: string) {
