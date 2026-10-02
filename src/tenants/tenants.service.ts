@@ -130,10 +130,17 @@ export class TenantsService {
 
   async updateBranding(id: string, dto: UpdateTenantBrandingDto) {
     await this.findOne(id);
-    return this.prisma.tenantBranding.upsert({
-      where: { tenantId: id },
-      create: { tenantId: id, ...dto },
-      update: dto,
+    return this.prisma.$transaction(async (tx) => {
+      // Trocar o logo por uma URL externa (ou limpar) descarta o logo enviado por upload, que
+      // senão ficaria órfão no banco.
+      if (dto.logoUrl !== undefined) {
+        await tx.tenantLogo.deleteMany({ where: { tenantId: id } });
+      }
+      return tx.tenantBranding.upsert({
+        where: { tenantId: id },
+        create: { tenantId: id, ...dto },
+        update: dto,
+      });
     });
   }
 

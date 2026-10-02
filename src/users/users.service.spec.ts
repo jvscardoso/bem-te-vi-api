@@ -1,3 +1,5 @@
+import type { UserTokensService } from '../account/user-tokens.service.js';
+import type { AccountMailerService } from '../account/account-mailer.service.js';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { AccessPolicyService } from '../access/access-policy.service.js';
@@ -40,7 +42,10 @@ function setup() {
   prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => fn(prisma));
 
   const policy = new AccessPolicyService(prisma as unknown as PrismaService);
-  const service = new UsersService(prisma as unknown as PrismaService, policy);
+  // Convite (criar sem senha) tem cobertura e2e; aqui basta não quebrar a construção.
+  const tokens = { issue: vi.fn(async () => 'token') } as unknown as UserTokensService;
+  const mailer = { sendInvite: vi.fn(async () => {}), dispatch: vi.fn() } as unknown as AccountMailerService;
+  const service = new UsersService(prisma as unknown as PrismaService, policy, tokens, mailer);
   return { prisma, service };
 }
 

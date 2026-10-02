@@ -1,6 +1,22 @@
-import { Body, Controller, Get, Param, Patch, Post, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { TenantsService } from './tenants.service.js';
+import { TenantLogoService } from './tenant-logo.service.js';
+import { LOGO_MAX_BYTES } from './logo-image.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
 import { UpdateTenantBrandingDto } from './dto/update-tenant-branding.dto.js';
@@ -13,7 +29,10 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator.js'
 @TenantParam('id')
 @Controller('tenants')
 export class TenantsController {
-  constructor(private readonly tenantsService: TenantsService) {}
+  constructor(
+    private readonly tenantsService: TenantsService,
+    private readonly logos: TenantLogoService,
+  ) {}
 
   // Signup público: cria o tenant + role "Admin" (todas as permissões) + usuário dono,
   // já que não existe ninguém autenticado ainda para fazer essas chamadas em sequência.
@@ -40,6 +59,20 @@ export class TenantsController {
   @Patch(':id/branding')
   updateBranding(@Param('id') id: string, @Body() dto: UpdateTenantBrandingDto) {
     return this.tenantsService.updateBranding(id, dto);
+  }
+
+  // Upload do logo (multipart/form-data, campo "file"). Acima do limite, o multer responde 413.
+  @RequirePermissions('tenant:manage')
+  @Put(':id/branding/logo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: LOGO_MAX_BYTES, files: 1 } }))
+  uploadLogo(@Param('id') id: string, @UploadedFile() file?: { buffer: Buffer }) {
+    return this.logos.upload(id, file);
+  }
+
+  @RequirePermissions('tenant:manage')
+  @Delete(':id/branding/logo')
+  removeLogo(@Param('id') id: string) {
+    return this.logos.remove(id);
   }
 
   // Instruções (nome/valor do TXT) para o cliente provar que é dono do `customDomain`.

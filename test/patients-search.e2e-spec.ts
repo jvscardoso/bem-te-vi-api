@@ -143,7 +143,10 @@ describe('Pacientes: busca e paginação (e2e)', () => {
     });
 
     it('SQL na busca é só texto: não quebra nem altera nada', async () => {
-      const before = await ctx.prisma.patient.count();
+      // Só os pacientes desta clínica: os outros arquivos de e2e criam pacientes em paralelo, e
+      // uma contagem global mudaria sozinha. Um DROP TABLE de verdade quebraria esta contagem também.
+      const countOwn = () => ctx.prisma.patient.count({ where: { tenantId: s.tenantId } });
+      const before = await countOwn();
 
       for (const q of ["'; DROP TABLE patients; --", "x' OR '1'='1", '") OR TRUE --', 'a\u0000b']) {
         const res = await list(s, { q }).set(s.auth);
@@ -152,7 +155,7 @@ describe('Pacientes: busca e paginação (e2e)', () => {
           expect(res.body.data).toEqual([]);
         }
       }
-      expect(await ctx.prisma.patient.count()).toBe(before);
+      expect(await countOwn()).toBe(before);
     });
   });
 

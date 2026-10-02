@@ -56,6 +56,16 @@ export class UsersController {
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Post(':id/invite')
+  resendInvite(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.usersService.resendInvite(tenantId, actor, id);
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
   @Patch(':id/password')
   resetPassword(
     @Param('tenantId') tenantId: string,

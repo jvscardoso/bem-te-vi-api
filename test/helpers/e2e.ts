@@ -7,6 +7,21 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { DnsTxtResolver } from '../../src/tenants/dns-txt-resolver.js';
+import { EmailSender, type EmailMessage } from '../../src/mail/email-sender.js';
+
+// Dublê de email: guarda as mensagens em vez de enviar. Todo app de teste usa um (nenhum
+// teste fala com SMTP); quem testa email passa o seu e lê `messages`.
+export class FakeEmailSender extends EmailSender {
+  messages: EmailMessage[] = [];
+
+  override async send(message: EmailMessage): Promise<void> {
+    this.messages.push(message);
+  }
+
+  to(email: string) {
+    return this.messages.filter((m) => m.to === email.toLowerCase());
+  }
+}
 
 export const PASSWORD = 'Senha@12345';
 
@@ -40,7 +55,9 @@ export interface TestTenant extends TestUser {
 // `dnsTxtResolver`: só quem testa verificação de domínio precisa de um dublê controlável
 // (não dá para apontar um TXT real num domínio de teste); os demais arquivos usam o real,
 // que nunca chega a ser chamado por eles.
-export async function createTestApp(opts: { dnsTxtResolver?: DnsTxtResolver } = {}): Promise<TestApp> {
+export async function createTestApp(
+  opts: { dnsTxtResolver?: DnsTxtResolver; emailSender?: EmailSender } = {},
+): Promise<TestApp> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ThrottlerStorage)
     .useValue({
@@ -51,6 +68,7 @@ export async function createTestApp(opts: { dnsTxtResolver?: DnsTxtResolver } = 
         timeToBlockExpire: 0,
       }),
     });
+  builder.overrideProvider(EmailSender).useValue(opts.emailSender ?? new FakeEmailSender());
   if (opts.dnsTxtResolver) {
     builder.overrideProvider(DnsTxtResolver).useValue(opts.dnsTxtResolver);
   }

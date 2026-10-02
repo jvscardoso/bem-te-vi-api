@@ -16,8 +16,17 @@ services:
       timeout: 3s
       retries: 10
 
+  # Caixa de email falsa para dev: recebe tudo que a API envia por SMTP (porta 1025) e mostra
+  # numa interface web em http://localhost:8025. Nada sai para a internet.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
   # A API só sobe com `--profile app`, para `docker compose up -d` continuar subindo só o
-  # banco (fluxo de dev com a API no host e hot reload).
+  # banco e o Mailpit (fluxo de dev com a API no host e hot reload).
   #   docker compose --profile app up -d --build
   api:
     profiles: ['app']
@@ -26,6 +35,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       # Dentro da rede do compose o banco é o host "db", não localhost.
       DATABASE_URL: postgresql://user:password@db:5432/bem_te_vi?schema=public
@@ -33,6 +44,12 @@ services:
       JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
       APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-}
+      # Emails vão para o Mailpit acima (host "mailpit" na rede do compose).
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      MAIL_FROM: ${MAIL_FROM:-bem-te-vi <nao-responda@bemtevi.local>}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:${PORT:-3000}}
     ports:
       - '${PORT:-3000}:3000'
 

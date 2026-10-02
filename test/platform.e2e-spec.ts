@@ -193,7 +193,12 @@ describe('Backoffice da plataforma (e2e)', () => {
     });
 
     it('texto malicioso na busca é só texto: não quebra nem altera nada', async () => {
-      const before = await ctx.prisma.tenant.count();
+      // Só as clínicas deste arquivo: outros arquivos de e2e criam clínicas em paralelo, e uma
+      // contagem global mudaria sozinha. Um DROP TABLE de verdade quebraria esta contagem também.
+      const ownIds = [...managedTenantIds, platform.tenantId];
+      const countOwn = () => ctx.prisma.tenant.count({ where: { id: { in: ownIds } } });
+      const before = await countOwn();
+      expect(before).toBeGreaterThan(0);
 
       for (const q of ["'; DROP TABLE tenants; --", "x' OR '1'='1", '") OR TRUE --']) {
         const res = await listUrl({ q }).set(platform.auth);
@@ -202,7 +207,7 @@ describe('Backoffice da plataforma (e2e)', () => {
           expect(res.body.data).toEqual([]);
         }
       }
-      expect(await ctx.prisma.tenant.count()).toBe(before);
+      expect(await countOwn()).toBe(before);
     });
 
     it('a clínica-plataforma nunca aparece na busca, nem pelo próprio nome', async () => {

@@ -5,7 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { hash } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { UserTokensService } from '../account/user-tokens.service.js';
+import { AccountMailerService } from '../account/account-mailer.service.js';
 import { AccessPolicyService, type Db } from '../access/access-policy.service.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
@@ -23,6 +26,8 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: AccessPolicyService,
+    private readonly tokens: UserTokensService,
+    private readonly mailer: AccountMailerService,
   ) {}
 
   async create(tenantId: string, actor: AuthenticatedUser, dto: CreateUserDto) {
@@ -40,18 +45,50 @@ export class UsersService {
     this.policy.assertCanGrant(actor, roleKeys);
     await this.assertDurationMeetsTenantMin(tenantId, dto.defaultAppointmentDurationMinutes);
 
-    const passwordHash = await hash(dto.password, SALT_ROUNDS);
-    return this.prisma.user.create({
+    // Convidado ganha uma senha aleatória que ninguém conhece (a coluna é obrigatória); ela é
+    // substituída quando ele aceita o convite. Enquanto `invited`, o login recusa de todo jeito.
+    const invite = dto.password === undefined;
+    const passwordHash = await hash(dto.password ?? randomBytes(32).toString('hex'), SALT_ROUNDS);
+    const user = await this.prisma.user.create({
       data: {
         tenantId,
         roleId: dto.roleId,
         name: dto.name,
         email,
         passwordHash,
+        status: invite ? 'invited' : 'active',
         defaultAppointmentDurationMinutes: dto.defaultAppointmentDurationMinutes,
       },
       omit: USER_SECRET_FIELDS,
     });
+    if (invite) {
+      await this.sendInvite(user);
+    }
+    return user;
+  }
+
+  // Reenvia o convite (email perdido, expirado). O link anterior deixa de valer.
+  async resendInvite(tenantId: string, actor: AuthenticatedUser, id: string) {
+    const target = await this.prisma.user.findFirst({
+      where: { id, tenantId },
+      select: { id: true, name: true, email: true, tenantId: true, roleId: true, status: true },
+    });
+    if (!target) {
+      throw new NotFoundException(`Usuário ${id} não encontrado`);
+    }
+    const targetKeys = (await this.policy.roleKeys(this.prisma, tenantId, target.roleId)) ?? [];
+    this.policy.assertCanManage(actor, targetKeys, 'usuário');
+    if (target.status !== 'invited') {
+      throw new ConflictException('Só é possível reenviar o convite de um usuário com status invited');
+    }
+    await this.sendInvite(target);
+  }
+
+  // O token é gravado antes de responder; o email segue em segundo plano (falha fica no log e
+  // o admin pode reenviar).
+  private async sendInvite(user: { id: string; name: string; email: string; tenantId: string }) {
+    const token = await this.tokens.issue(user.id, 'invite');
+    this.mailer.dispatch(this.mailer.sendInvite(user, token), `convite para ${user.email}`);
   }
 
   // Ordem por nome com desempate por id, para as páginas não repetirem nem pularem usuários.

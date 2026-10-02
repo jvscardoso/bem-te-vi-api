@@ -9,12 +9,15 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { TenantAccessGuard } from './guards/tenant-access.guard.js';
 import { PermissionsGuard } from './guards/permissions.guard.js';
 import { TenantsModule } from '../tenants/tenants.module.js';
+import { AccountModule } from '../account/account.module.js';
 
 @Module({
   imports: [
     PassportModule,
     // TenantHostResolver: o login restringe à clínica do host com a mesma regra da marca pública.
     TenantsModule,
+    // Tokens e emails de recuperação de senha e convite.
+    AccountModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

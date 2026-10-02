@@ -4,8 +4,12 @@ import { compare, hash } from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { TenantHostResolver } from '../tenants/tenant-host-resolver.js';
+import { UserTokensService } from '../account/user-tokens.service.js';
+import { AccountMailerService } from '../account/account-mailer.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { TokenPasswordDto } from './dto/token-password.dto.js';
 import type { AuthenticatedUser, JwtPayload } from './types/auth.types.js';
 
 const SALT_ROUNDS = 12;
@@ -20,7 +24,77 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly hostResolver: TenantHostResolver,
+    private readonly tokens: UserTokensService,
+    private readonly mailer: AccountMailerService,
   ) {}
+
+  // Sempre a mesma resposta (204), exista ou não a conta: a busca, o token e o email rodam em
+  // segundo plano, então nem a resposta nem o tempo dela revelam se o email está cadastrado.
+  // Só contas que conseguiriam logar recebem o link: ativas, de clínica ativa e — se o pedido
+  // veio pelo endereço de uma clínica — dessa clínica (mesma regra do login).
+  forgotPassword(dto: ForgotPasswordDto) {
+    this.mailer.dispatch(this.sendPasswordReset(dto), 'recuperação de senha');
+  }
+
+  private async sendPasswordReset({ email, host }: ForgotPasswordDto) {
+    const [user, hostTenantId] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+        select: { id: true, name: true, email: true, tenantId: true, status: true, tenant: { select: { status: true } } },
+      }),
+      host ? this.hostResolver.findActiveTenantId(host) : null,
+    ]);
+    if (
+      !user ||
+      user.status !== 'active' ||
+      user.tenant.status !== 'active' ||
+      (hostTenantId !== null && hostTenantId !== user.tenantId)
+    ) {
+      return;
+    }
+    const token = await this.tokens.issue(user.id, 'password_reset');
+    await this.mailer.sendPasswordReset(user, token);
+  }
+
+  // Troca a senha e derruba todas as sessões (passwordVersion), como a troca autenticada.
+  // Devolve o email para o frontend preencher o login em seguida.
+  async resetPassword(dto: TokenPasswordDto) {
+    const passwordHash = await hash(dto.password, SALT_ROUNDS);
+    return this.prisma.$transaction(async (tx) => {
+      const userId = await this.tokens.consume(tx, dto.token, 'password_reset');
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { status: true, email: true, tenant: { select: { status: true } } },
+      });
+      // Desativado ou clínica suspensa depois do pedido: o link deixa de valer.
+      if (user.status !== 'active' || user.tenant.status !== 'active') {
+        this.tokens.invalid();
+      }
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, passwordVersion: { increment: 1 } },
+      });
+      return { email: user.email };
+    });
+  }
+
+  // Convidado define a própria senha e a conta passa a `active`. Só vale para quem ainda está
+  // `invited`: um convite antigo não reativa uma conta desativada depois.
+  async acceptInvite(dto: TokenPasswordDto) {
+    const passwordHash = await hash(dto.password, SALT_ROUNDS);
+    return this.prisma.$transaction(async (tx) => {
+      const userId = await this.tokens.consume(tx, dto.token, 'invite');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { status: true, email: true } });
+      if (user.status !== 'invited') {
+        this.tokens.invalid();
+      }
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, status: 'active', passwordVersion: { increment: 1 } },
+      });
+      return { email: user.email };
+    });
+  }
 
   async login(dto: LoginDto) {
     // Em paralelo: resolver o host custa o mesmo para qualquer email, então não muda o tempo

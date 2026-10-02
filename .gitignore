@@ -25,3 +25,6 @@ npm-debug.log*
 
 # prisma
 prisma/dev.db
+
+# tasks para o frontend (enviadas ao repositório do front, não versionadas aqui)
+docs/changes/
