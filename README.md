@@ -189,7 +189,9 @@ Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" 
 
 ## Autenticação e autorização (`src/auth`)
 
-- Login: `POST /auth/login` com `{ email, password }` → retorna um JWT (`accessToken`) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`).
+- Login: `POST /auth/login` com `{ email, password, host? }` → retorna um JWT (`accessToken`) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`).
+- **Login restrito à clínica do endereço.** `host` é o `window.location.host` do frontend, o mesmo enviado a `GET /public/branding`, e é resolvido pela mesma regra (`TenantHostResolver`, compartilhado pelos dois endpoints). Se ele aponta para uma clínica, só usuários dela entram por ali: senão `401` com a mesma mensagem genérica "Credenciais inválidas" (não revela que o email existe em outra clínica). Sem isso, a página com a marca da clínica B aceitava o login de um usuário da A e mostrava os dados da A com a marca da B — confuso e um prato cheio para phishing. Host que não resolve (domínio principal da plataforma, desconhecido, domínio próprio não verificado, clínica suspensa) ou ausente não restringe: nessas telas o front mostra a marca padrão, e o campo é opcional por compatibilidade (scripts, Postman). A checagem vem depois de validar a senha e o host é resolvido em paralelo com a busca do usuário, para o tempo de resposta não depender da clínica do email.
+- **Tempo de resposta do login não revela emails cadastrados:** email inexistente também roda um `bcrypt.compare` (contra um hash descartável), em vez de responder antes e mais rápido que uma senha errada.
 - Toda rota é protegida por padrão (`JwtAuthGuard` global). Para deixar uma rota pública, use `@Public()`.
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
 - `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
@@ -270,7 +272,7 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 |---|---|
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
 | `unit` | `npm test` (82 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (357 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `e2e` | `npm run test:e2e` (372 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -311,4 +313,5 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `errors.e2e-spec.ts` — erros de unique/FK do banco viram 409/404 (`PrismaExceptionFilter`), nunca 500.
   - `account-rules.e2e-spec.ts` — escalada de privilégio (usuários e papéis), último administrador e corrida entre admins (sem o lock por tenant os testes de concorrência falham).
   - `passwords.e2e-spec.ts` — troca da própria senha (senha atual errada dá 400, token novo devolvido) e redefinição pelo admin (não para si, não para quem está acima), e que ambas derrubam as sessões abertas do usuário.
+  - `login-host.e2e-spec.ts` — login restrito à clínica do host: subdomínio, domínio próprio verificado, subdomínio puro de dev, maiúsculas/porta; outra clínica dá 401 idêntico ao de senha errada (sem atualizar `lastLoginAt`); host sem clínica (principal, desconhecido, domínio não verificado, clínica suspensa) ou ausente não restringe; usuários da plataforma; validação do campo.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

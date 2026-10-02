@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { TenantHostResolver } from './tenant-host-resolver.js';
 
 // Resolve a clínica a partir do host do frontend e devolve só o que é seguro expor
 // antes do login (identidade visual). Sem id, status, configurações ou qualquer dado de negócio.
@@ -9,22 +8,23 @@ import { PrismaService } from '../prisma/prisma.service.js';
 export class PublicBrandingService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    private readonly hostResolver: TenantHostResolver,
   ) {}
 
   async resolve(rawHost: string) {
-    const host = this.normalizeHost(rawHost);
-
     // Tenant suspenso responde como inexistente: não há o que tematizar, o login está bloqueado.
-    const tenant = await this.prisma.tenant.findFirst({
-      where: { status: 'active', OR: this.candidates(host) },
-      select: {
-        name: true,
-        branding: {
-          select: { tradeName: true, logoUrl: true, primaryColor: true, secondaryColor: true },
-        },
-      },
-    });
+    const tenantId = await this.hostResolver.findActiveTenantId(rawHost);
+    const tenant = tenantId
+      ? await this.prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: {
+            name: true,
+            branding: {
+              select: { tradeName: true, logoUrl: true, primaryColor: true, secondaryColor: true },
+            },
+          },
+        })
+      : null;
     if (!tenant) {
       throw new NotFoundException('Clínica não encontrada para este endereço');
     }
@@ -36,36 +36,5 @@ export class PublicBrandingService {
       primaryColor: tenant.branding?.primaryColor ?? null,
       secondaryColor: tenant.branding?.secondaryColor ?? null,
     };
-  }
-
-  // Domínio próprio casa por igualdade exata. O subdomínio vem de "<sub>.<APP_BASE_DOMAIN>";
-  // sem APP_BASE_DOMAIN configurado (ou com um host sem ponto, como em dev), o próprio host
-  // é tratado como subdomínio.
-  private candidates(host: string): Prisma.TenantWhereInput[] {
-    // Domínio próprio só resolve depois de comprovado por DNS (ver TenantsService.verifyDomain).
-    // Sem isso, quem reivindica o domínio de outra empresa no signup controlaria a marca
-    // exibida nesse host antes mesmo de provar que é dono dele.
-    const candidates: Prisma.TenantWhereInput[] = [
-      { customDomain: host, customDomainVerifiedAt: { not: null } },
-    ];
-
-    const baseDomain = this.config.get<string>('APP_BASE_DOMAIN')?.trim().toLowerCase();
-    if (baseDomain && host.endsWith(`.${baseDomain}`)) {
-      const subdomain = host.slice(0, -(baseDomain.length + 1));
-      if (subdomain && !subdomain.includes('.')) {
-        candidates.push({ subdomain });
-      }
-    } else if (!host.includes('.')) {
-      candidates.push({ subdomain: host });
-    }
-    return candidates;
-  }
-
-  private normalizeHost(rawHost: string): string {
-    return rawHost
-      .trim()
-      .toLowerCase()
-      .replace(/:\d+$/, '')
-      .replace(/\.$/, '');
   }
 }

@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash } from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { TenantHostResolver } from '../tenants/tenant-host-resolver.js';
 import { LoginDto } from './dto/login.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import type { AuthenticatedUser, JwtPayload } from './types/auth.types.js';
@@ -10,30 +12,47 @@ const SALT_ROUNDS = 12;
 
 @Injectable()
 export class AuthService {
+  // Comparado quando o email não existe, para essa resposta custar o mesmo bcrypt que uma
+  // senha errada — senão a diferença de tempo revelaria quais emails estão cadastrados.
+  private readonly dummyHash = hash(randomUUID(), SALT_ROUNDS);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly hostResolver: TenantHostResolver,
   ) {}
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-      include: {
-        tenant: { select: { status: true } },
-        role: {
-          include: { permissions: { include: { permission: true } } },
+    // Em paralelo: resolver o host custa o mesmo para qualquer email, então não muda o tempo
+    // de resposta conforme a clínica do usuário.
+    const [user, hostTenantId] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { email: dto.email.toLowerCase() },
+        include: {
+          tenant: { select: { status: true } },
+          role: {
+            include: { permissions: { include: { permission: true } } },
+          },
         },
-      },
-    });
+      }),
+      dto.host ? this.hostResolver.findActiveTenantId(dto.host) : null,
+    ]);
 
-    // Mensagem genérica em ambos os casos (email inexistente, senha errada,
-    // conta desabilitada, tenant suspenso) para não dar pista a quem está tentando enumerar contas.
-    if (!user || user.status !== 'active' || user.tenant.status !== 'active') {
-      throw new UnauthorizedException('Credenciais inválidas');
-    }
+    const passwordMatches = await compare(dto.password, user?.passwordHash ?? (await this.dummyHash));
 
-    const passwordMatches = await compare(dto.password, user.passwordHash);
-    if (!passwordMatches) {
+    // Mensagem genérica em todos os casos (email inexistente, senha errada, conta desabilitada,
+    // tenant suspenso, usuário de outra clínica) para não dar pista a quem está tentando
+    // enumerar contas — nem em qual clínica um email está cadastrado.
+    // Clínica do host: o endereço exibe a marca dela (GET /public/branding resolve igual), então
+    // só usuários dela entram por ali. Host sem clínica (domínio da plataforma, desconhecido)
+    // ou ausente não restringe.
+    if (
+      !user ||
+      !passwordMatches ||
+      user.status !== 'active' ||
+      user.tenant.status !== 'active' ||
+      (hostTenantId !== null && hostTenantId !== user.tenantId)
+    ) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
