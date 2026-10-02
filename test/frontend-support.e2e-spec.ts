@@ -21,7 +21,7 @@ describe('Suporte ao frontend (e2e)', () => {
   let a: TestTenant;
   let b: TestTenant;
   let platform: TestTenant;
-  // Recepção: agenda + leitura de pacientes, sem users:manage nem tenant:manage.
+  // Recepção: agenda de todos + leitura de pacientes, sem users:manage nem tenant:manage.
   let reception: TestUser;
   let professional: TestUser;
   let patient: { id: string; fullName: string };
@@ -35,7 +35,7 @@ describe('Suporte ao frontend (e2e)', () => {
     b = await signupTenant(ctx.http, 'front-b');
     platform = await createPlatformAdmin(ctx);
 
-    const ids = await permissionIds(ctx.prisma, ['appointments:read', 'appointments:write', 'patients:read']);
+    const ids = await permissionIds(ctx.prisma, ['appointments:read', 'appointments:write', 'appointments:all', 'patients:read']);
     const role = await ctx
       .http()
       .post(`/tenants/${a.tenantId}/roles`)
@@ -146,7 +146,7 @@ describe('Suporte ao frontend (e2e)', () => {
         role: { id: expect.any(String), name: expect.stringContaining('Recepção') },
       });
       expect(res.body.role.id).toBe(res.body.roleId);
-      expect(res.body.permissions.sort()).toEqual(['appointments:read', 'appointments:write', 'patients:read']);
+      expect(res.body.permissions.sort()).toEqual(['appointments:all', 'appointments:read', 'appointments:write', 'patients:read']);
     });
   });
 

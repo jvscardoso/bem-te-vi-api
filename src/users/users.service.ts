@@ -14,6 +14,7 @@ import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { pageOf } from '../common/pagination/page.js';
 import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
+import { APPOINTMENTS_ALL } from '../appointments/appointments-scope.js';
 
 const SALT_ROUNDS = 12;
 
@@ -143,14 +144,16 @@ export class UsersService {
   // critério que AppointmentsService aplica). Campos mínimos, para liberar a quem só tem
   // acesso à agenda sem expor email/status/papel. A duração efetiva evita que o cliente
   // precise ler as configurações da clínica (que exigem tenant:manage) para prever o fim.
-  async findProfessionals(tenantId: string) {
+  // Sem appointments:all, a lista é só o próprio usuário: é a única agenda que ele pode usar.
+  async findProfessionals(tenantId: string, actor: AuthenticatedUser) {
+    const ownOnly = !actor.permissions.includes(APPOINTMENTS_ALL);
     const [tenant, users] = await Promise.all([
       this.prisma.tenant.findUniqueOrThrow({
         where: { id: tenantId },
         select: { defaultAppointmentDurationMinutes: true },
       }),
       this.prisma.user.findMany({
-        where: { tenantId, status: 'active' },
+        where: { tenantId, status: 'active', ...(ownOnly ? { id: actor.userId } : {}) },
         select: { id: true, name: true, defaultAppointmentDurationMinutes: true },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       }),

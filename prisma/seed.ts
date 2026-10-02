@@ -6,8 +6,11 @@ import { PrismaClient } from '@prisma/client';
 const PERMISSIONS = [
   { key: 'patients:read', description: 'Ver pacientes' },
   { key: 'patients:write', description: 'Criar/editar pacientes e anamnese' },
-  { key: 'appointments:read', description: 'Ver agenda' },
-  { key: 'appointments:write', description: 'Criar/editar agendamentos' },
+  { key: 'appointments:read', description: 'Ver a própria agenda' },
+  { key: 'appointments:write', description: 'Criar/editar agendamentos da própria agenda' },
+  // Estende appointments:read/write à agenda de todos os profissionais (recepção, dono).
+  // Sem ela, o usuário só vê e mexe nos agendamentos em que ele é o profissional.
+  { key: 'appointments:all', description: 'Ver e gerenciar a agenda de todos os profissionais' },
   { key: 'users:manage', description: 'Gerenciar usuários do tenant' },
   { key: 'roles:manage', description: 'Gerenciar papéis e permissões' },
   { key: 'tenant:manage', description: 'Gerenciar dados e marca do tenant' },

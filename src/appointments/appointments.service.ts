@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { AppointmentStatus, Prisma } from '@prisma/client';
 import { pageOf, type Page } from '../common/pagination/page.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
+import { APPOINTMENTS_ALL } from './appointments-scope.js';
 import { CreateAppointmentDto } from './dto/create-appointment.dto.js';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto.js';
 import { FindAppointmentsQueryDto } from './dto/find-appointments-query.dto.js';
@@ -38,7 +41,8 @@ const ALLOWED_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
 export class AppointmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(tenantId: string, dto: CreateAppointmentDto) {
+  async create(tenantId: string, actor: AuthenticatedUser, dto: CreateAppointmentDto) {
+    this.assertCanUseAgendaOf(actor, dto.professionalId);
     await this.assertPatientInTenant(tenantId, dto.patientId);
     const professional = await this.getActiveProfessional(tenantId, dto.professionalId);
     const settings = await this.getTenantSettings(tenantId);
@@ -74,8 +78,18 @@ export class AppointmentsService {
 
   // Ordem por horário com desempate por id: dois agendamentos no mesmo horário (profissionais
   // diferentes) não podem trocar de lugar entre páginas, senão a paginação repete ou pula.
-  async findAll(tenantId: string, query: FindAppointmentsQueryDto): Promise<Page<AppointmentView>> {
+  async findAll(
+    tenantId: string,
+    actor: AuthenticatedUser,
+    query: FindAppointmentsQueryDto,
+  ): Promise<Page<AppointmentView>> {
     const { page, pageSize } = query;
+    // Sem appointments:all, a listagem é sempre a da própria agenda; pedir a de outro é 403
+    // (e não uma lista vazia, que pareceria "esse profissional não tem nada marcado").
+    if (query.professionalId) {
+      this.assertCanUseAgendaOf(actor, query.professionalId);
+    }
+    const professionalId = this.seesAllAgendas(actor) ? query.professionalId : actor.userId;
     const from = query.from ? new Date(query.from) : undefined;
     const to = query.to ? new Date(query.to) : undefined;
     if (from && to && from > to) {
@@ -86,7 +100,7 @@ export class AppointmentsService {
     // (Antes só o início era considerado, e um atendimento em andamento sumia da janela.)
     const where: Prisma.AppointmentWhereInput = {
       tenantId,
-      professionalId: query.professionalId,
+      professionalId,
       patientId: query.patientId,
       status: query.status ? { in: query.status } : undefined,
       endsAt: from ? { gt: from } : undefined,
@@ -106,9 +120,15 @@ export class AppointmentsService {
     return pageOf(data, total, page, pageSize);
   }
 
-  async findOne(tenantId: string, id: string) {
+  // Agendamento da agenda de outro profissional, para quem não tem appointments:all, responde
+  // como inexistente (404) — igual a um id de outra clínica, sem confirmar que ele existe.
+  async findOne(tenantId: string, actor: AuthenticatedUser, id: string) {
     const appointment = await this.prisma.appointment.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+        ...(this.seesAllAgendas(actor) ? {} : { professionalId: actor.userId }),
+      },
       include: APPOINTMENT_INCLUDE,
     });
     if (!appointment) {
@@ -117,8 +137,12 @@ export class AppointmentsService {
     return appointment;
   }
 
-  async update(tenantId: string, id: string, dto: UpdateAppointmentDto) {
-    const existing = await this.findOne(tenantId, id);
+  async update(tenantId: string, actor: AuthenticatedUser, id: string, dto: UpdateAppointmentDto) {
+    const existing = await this.findOne(tenantId, actor, id);
+    // Também não dá para passar um agendamento da própria agenda para a de outro profissional.
+    if (dto.professionalId !== undefined) {
+      this.assertCanUseAgendaOf(actor, dto.professionalId);
+    }
     this.assertStatusTransition(existing.status, dto.status);
 
     const timesChanged = dto.scheduledAt !== undefined || dto.endsAt !== undefined;
@@ -183,8 +207,21 @@ export class AppointmentsService {
     });
   }
 
-  async remove(tenantId: string, id: string) {
-    await this.update(tenantId, id, { status: 'cancelled' });
+  async remove(tenantId: string, actor: AuthenticatedUser, id: string) {
+    await this.update(tenantId, actor, id, { status: 'cancelled' });
+  }
+
+  private seesAllAgendas(actor: AuthenticatedUser) {
+    return actor.permissions.includes(APPOINTMENTS_ALL);
+  }
+
+  // Sem appointments:all, só a própria agenda (agendamentos em que o ator é o profissional).
+  private assertCanUseAgendaOf(actor: AuthenticatedUser, professionalId: string) {
+    if (professionalId !== actor.userId && !this.seesAllAgendas(actor)) {
+      throw new ForbiddenException(
+        `Sem acesso à agenda de outros profissionais (exige ${APPOINTMENTS_ALL})`,
+      );
+    }
   }
 
   private assertStatusTransition(current: AppointmentStatus, next?: AppointmentStatus) {

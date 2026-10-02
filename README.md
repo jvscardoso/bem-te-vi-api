@@ -166,6 +166,8 @@ Cada clínica define os próprios campos da ficha (chave, rótulo, tipo, obrigat
 
 Configuração: a clínica define `defaultAppointmentDurationMinutes` e `minAppointmentDurationMinutes` (piso aplicado aos dois modos; ex.: psicologia com mínimo de 60) via `PATCH /tenants/:id` (ou no signup). O profissional ajusta a própria duração em `PATCH /tenants/:tenantId/users/me/appointment-settings` (`null` volta a usar a da clínica); quem tem `users:manage` também pode definir a de outro usuário.
 
+**Escopo: própria agenda × todas.** `appointments:read`/`appointments:write` valem só para a **própria agenda** (agendamentos em que o usuário é o profissional). A permissão `appointments:all` estende as duas à agenda de todos os profissionais da clínica — é o que a recepção e o dono têm; um profissional recém-cadastrado, não. Sem ela: a listagem é sempre a da própria agenda (filtrar por outro `professionalId` dá `403`, não uma lista vazia que pareceria "esse profissional está livre"); detalhe, edição e cancelamento de agendamento de outro profissional dão `404` (sem confirmar que ele existe); criar na agenda de outro ou passar um agendamento próprio para outro dá `403`; e `GET /professionals` traz só o próprio usuário. O papel Admin do signup recebe `appointments:all` junto com o resto do catálogo. **Migração:** antes, `appointments:read` significava "todas as agendas"; a migration `appointments_all_scope` deu `appointments:all` a todo papel que tinha `appointments:read`, para ninguém perder acesso no deploy — para restringir um papel (ex.: "Médico") à própria agenda, remova a permissão dele pelo editor de papéis.
+
 **Regras.**
 - Um profissional não pode ter dois agendamentos ativos (`scheduled`, `confirmed`, `completed`) com horários sobrepostos (409). A checagem roda numa transação com advisory lock por profissional, para evitar corrida entre requisições simultâneas.
 - Ao remarcar só o início, a duração original é mantida.
@@ -222,7 +224,7 @@ Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes va
 
 **Catálogo de permissões.** `GET /permissions` (`roles:manage`) lista `{ id, key, description }` para o editor de papéis montar `permissionIds`. As `platform:*` só aparecem para quem já tem alguma (para uma clínica elas nunca são concedíveis).
 
-**Lista de profissionais.** `GET /tenants/:tenantId/professionals` exige só `appointments:read`: quem agenda (ex.: recepção) precisa escolher o profissional sem poder gerenciar usuários. Devolve só usuários ativos (mesmo critério da agenda) com `{ id, name, defaultAppointmentDurationMinutes, effectiveAppointmentDurationMinutes }` — sem email/status/papel. A duração efetiva (própria ou da clínica) existe porque ler as configurações da clínica exige `tenant:manage`.
+**Lista de profissionais.** `GET /tenants/:tenantId/professionals` exige só `appointments:read`: quem agenda (ex.: recepção) precisa escolher o profissional sem poder gerenciar usuários. Devolve só usuários ativos (mesmo critério da agenda) com `{ id, name, defaultAppointmentDurationMinutes, effectiveAppointmentDurationMinutes }` — sem email/status/papel. A duração efetiva (própria ou da clínica) existe porque ler as configurações da clínica exige `tenant:manage`. Sem `appointments:all`, a lista traz só o próprio usuário (é a única agenda que ele pode usar).
 
 **Listagem e paginação.** `GET /tenants/:tenantId/users` e `GET /tenants/:tenantId/roles` são paginados (mesmo padrão de pacientes/agenda: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" } }`, `page` padrão `1`, `pageSize` padrão `20` e máximo `100`; parâmetro inválido ou desconhecido → `400`). Ordenados por nome, com desempate por id. Sem busca por texto por enquanto (`q`) — são listas tipicamente pequenas por clínica; se isso mudar, adicionar do mesmo jeito que em pacientes.
 
@@ -271,8 +273,8 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 | Job | O que valida |
 |---|---|
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
-| `unit` | `npm test` (82 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (372 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `unit` | `npm test` (90 testes, sem banco) |
+| `e2e` | `npm run test:e2e` (382 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -314,4 +316,5 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `account-rules.e2e-spec.ts` — escalada de privilégio (usuários e papéis), último administrador e corrida entre admins (sem o lock por tenant os testes de concorrência falham).
   - `passwords.e2e-spec.ts` — troca da própria senha (senha atual errada dá 400, token novo devolvido) e redefinição pelo admin (não para si, não para quem está acima), e que ambas derrubam as sessões abertas do usuário.
   - `login-host.e2e-spec.ts` — login restrito à clínica do host: subdomínio, domínio próprio verificado, subdomínio puro de dev, maiúsculas/porta; outra clínica dá 401 idêntico ao de senha errada (sem atualizar `lastLoginAt`); host sem clínica (principal, desconhecido, domínio não verificado, clínica suspensa) ou ausente não restringe; usuários da plataforma; validação do campo.
+  - `appointments-scope.e2e-spec.ts` — escopo da agenda: o dono (Admin, com `appointments:all`) vê e filtra todas; um médico sem ela só lista a própria agenda (403 ao pedir a de um colega, 404 no detalhe/edição/cancelamento de agendamento alheio, 403 ao criar ou mover para outro), só se vê na lista de profissionais, e passa a ver tudo assim que o papel ganha a permissão, sem novo login.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.
