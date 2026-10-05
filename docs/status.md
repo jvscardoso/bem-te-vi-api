@@ -89,6 +89,7 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 
 | Arquivo | Conteúdo |
 |---|---|
+| `CLAUDE.md` | Instruções para sessões do Claude Code: comandos, invariantes, convenções e checklist de entrega |
 | `README.md` | Como rodar e contrato da API, por domínio |
 | `docs/arquitetura.md` | Módulos, pipeline da requisição, padrões, segurança, infraestrutura |
 | `docs/banco-de-dados.md` | Modelo, integridade, SQL fora do Prisma, migrations |
