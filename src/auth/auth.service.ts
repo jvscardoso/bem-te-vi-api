@@ -10,6 +10,9 @@ import { LoginDto } from './dto/login.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { TokenPasswordDto } from './dto/token-password.dto.js';
+import { AcceptInviteDto } from './dto/accept-invite.dto.js';
+import { LegalService } from '../legal/legal.service.js';
+import type { LegalAcceptanceDto } from '../legal/dto/legal-acceptance.dto.js';
 import type { AuthenticatedUser, JwtPayload } from './types/auth.types.js';
 
 const SALT_ROUNDS = 12;
@@ -26,6 +29,7 @@ export class AuthService {
     private readonly hostResolver: TenantHostResolver,
     private readonly tokens: UserTokensService,
     private readonly mailer: AccountMailerService,
+    private readonly legal: LegalService,
   ) {}
 
   // Sempre a mesma resposta (204), exista ou não a conta: a busca, o token e o email rodam em
@@ -80,11 +84,16 @@ export class AuthService {
 
   // Convidado define a própria senha e a conta passa a `active`. Só vale para quem ainda está
   // `invited`: um convite antigo não reativa uma conta desativada depois.
-  async acceptInvite(dto: TokenPasswordDto) {
+  async acceptInvite(dto: AcceptInviteDto) {
+    // Versão desatualizada é 400 antes de gastar o token (a pessoa recarrega a tela e tenta de novo).
+    this.legal.assertCurrent(dto.legalAcceptance);
     const passwordHash = await hash(dto.password, SALT_ROUNDS);
     return this.prisma.$transaction(async (tx) => {
       const userId = await this.tokens.consume(tx, dto.token, 'invite');
-      const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { status: true, email: true } });
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { id: true, tenantId: true, status: true, email: true },
+      });
       if (user.status !== 'invited') {
         this.tokens.invalid();
       }
@@ -92,6 +101,7 @@ export class AuthService {
         where: { id: userId },
         data: { passwordHash, status: 'active', passwordVersion: { increment: 1 } },
       });
+      await this.legal.record(tx, user, dto.legalAcceptance);
       return { email: user.email };
     });
   }
@@ -159,12 +169,23 @@ export class AuthService {
   // Identidade + dados de exibição. As permissões vêm do request (já relidas do banco pelo
   // JwtStrategy); nome, email e papel são lidos aqui para o cliente não depender do que
   // guardou no login, que pode ter ficado velho.
+  // `pendingLegalDocuments`: Termos/Política cuja versão vigente o usuário ainda não aceitou
+  // (usuário criado com senha pelo admin, ou versão nova publicada). O frontend bloqueia o uso
+  // até o aceite em POST /auth/me/legal-acceptances.
   async me(actor: AuthenticatedUser) {
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: actor.userId },
-      select: { name: true, email: true, role: { select: { id: true, name: true } } },
-    });
-    return { ...actor, name: user.name, email: user.email, role: user.role };
+    const [user, pendingLegalDocuments] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: actor.userId },
+        select: { name: true, email: true, role: { select: { id: true, name: true } } },
+      }),
+      this.legal.pending(actor.userId),
+    ]);
+    return { ...actor, name: user.name, email: user.email, role: user.role, pendingLegalDocuments };
+  }
+
+  async acceptLegal(actor: AuthenticatedUser, dto: LegalAcceptanceDto) {
+    await this.legal.record(this.prisma, { id: actor.userId, tenantId: actor.tenantId }, dto);
+    return { pendingLegalDocuments: await this.legal.pending(actor.userId) };
   }
 
   // Exige a senha atual: um token roubado sozinho não basta para tomar a conta.

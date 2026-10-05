@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { TenantsService } from './tenants.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { DnsTxtResolver } from './dns-txt-resolver.js';
+import type { LegalService } from '../legal/legal.service.js';
 
 function setup(tenant = { defaultAppointmentDurationMinutes: 30, minAppointmentDurationMinutes: 5 }) {
   const prisma = {
@@ -16,6 +17,8 @@ function setup(tenant = { defaultAppointmentDurationMinutes: 30, minAppointmentD
   const service = new TenantsService(
     prisma as unknown as PrismaService,
     dnsTxtResolver as unknown as DnsTxtResolver,
+    // Aceite de termos só no cadastro (coberto em e2e); aqui só o construtor.
+    {} as unknown as LegalService,
   );
   return { prisma, service };
 }

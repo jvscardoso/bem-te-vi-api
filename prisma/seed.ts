@@ -17,6 +17,8 @@ const PERMISSIONS = [
   { key: 'anamnesis_templates:manage', description: 'Criar/editar/apagar formulários de anamnese' },
   { key: 'billing:read', description: 'Ver cobranças, pagamentos e relatório financeiro' },
   { key: 'billing:write', description: 'Criar cobranças, registrar pagamentos, cancelar cobranças' },
+  { key: 'audit:read', description: 'Ver a trilha de auditoria (quem acessou ou alterou dados de pacientes)' },
+  { key: 'patients:export', description: 'Exportar todos os dados de um paciente (pedido do titular, LGPD)' },
   // Backoffice da própria plataforma (listar/suspender clínicas). Nunca concedida
   // automaticamente no signup — ver o filtro em TenantsService.create().
   { key: 'platform:manage', description: 'Gerenciar tenants da plataforma (backoffice)' },

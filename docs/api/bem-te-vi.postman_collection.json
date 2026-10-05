@@ -81,7 +81,7 @@
             "description": "Rota pública. Cria, numa transação, o tenant + papel \"Admin\" (todas as permissões) + usuário dono. Cada execução gera um sufixo novo, então dá para repetir sem conflito.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Clínica {{suffix}}\",\n  \"subdomain\": \"clinica-{{suffix}}\",\n  \"owner\": {\n    \"name\": \"Dono {{suffix}}\",\n    \"email\": \"dono-{{suffix}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Clínica {{suffix}}\",\n  \"subdomain\": \"clinica-{{suffix}}\",\n  \"owner\": {\n    \"name\": \"Dono {{suffix}}\",\n    \"email\": \"dono-{{suffix}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  },\n  \"legalAcceptance\": {\n    \"termsVersion\": \"1\",\n    \"privacyVersion\": \"1\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -158,7 +158,7 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('accessToken', b.accessToken);",
-                  "pm.test(\"o dono tem as 7 permissões\", () => pm.expect(b.user.permissions.length === 7).to.be.true);"
+                  "pm.test(\"o dono tem as permissões da clínica, nunca as de plataforma\", () => pm.expect(b.user.permissions.includes('patients:write') && b.user.permissions.includes('audit:read') && !b.user.permissions.some((k) => k.startsWith('platform:'))).to.be.true);"
                 ]
               }
             }
@@ -518,7 +518,7 @@
           ]
         },
         {
-          "name": "Marca pública — por domínio próprio",
+          "name": "Marca pública — domínio próprio ainda não verificado",
           "request": {
             "method": "GET",
             "header": [],
@@ -538,6 +538,7 @@
                 }
               ]
             },
+            "description": "Um domínio próprio só passa a controlar a marca depois de verificado por DNS (registro TXT, ver GET /tenants/:id/domain). Sem isso, quem declarasse o domínio de outra empresa controlaria a marca exibida nele.",
             "auth": {
               "type": "noauth"
             }
@@ -548,9 +549,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "const b = pm.response.json();",
-                  "pm.test(\"mesma clínica\", () => pm.expect(b.tradeName === 'Clínica Sorriso').to.be.true);"
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
                 ]
               }
             }
@@ -624,7 +623,7 @@
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
-                  "const admin = b.find((r) => r.name === 'Admin');",
+                  "const admin = b.data.find((r) => r.name === 'Admin');",
                   "const id = (key) => admin.permissions.find((p) => p.permission.key === key).permission.id;",
                   "pm.collectionVariables.set('permPatientsRead', id('patients:read'));",
                   "pm.collectionVariables.set('permPatientsWrite', id('patients:write'));",
@@ -633,7 +632,7 @@
                   "pm.collectionVariables.set('permUsersManage', id('users:manage'));",
                   "pm.collectionVariables.set('permRolesManage', id('roles:manage'));",
                   "pm.collectionVariables.set('permTenantManage', id('tenant:manage'));",
-                  "pm.test(\"o papel Admin tem as 7 permissões\", () => pm.expect(admin.permissions.length === 7).to.be.true);"
+                  "pm.test(\"o papel Admin tem as permissões da clínica, nunca as de plataforma\", () => pm.expect(admin.permissions.length > 0 && !admin.permissions.some((p) => p.permission.key.startsWith('platform:'))).to.be.true);"
                 ]
               }
             }
@@ -892,7 +891,7 @@
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
-                  "pm.test(\"só o dono por enquanto\", () => pm.expect(b.length === 1 && b[0].passwordHash === undefined).to.be.true);"
+                  "pm.test(\"só o dono por enquanto\", () => pm.expect(b.data.length === 1 && b.meta.total === 1 && b.data[0].passwordHash === undefined).to.be.true);"
                 ]
               }
             }
@@ -2105,6 +2104,47 @@
           ]
         },
         {
+          "name": "Criar formulário de anamnese",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/anamnesis-templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "anamnesis-templates"
+              ]
+            },
+            "description": "Cada clínica define os campos da ficha (chave, rótulo, tipo, obrigatório, opções). As respostas são validadas contra ele.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ficha padrão {{suffix}}\",\n  \"fields\": [\n    {\n      \"key\": \"queixa_principal\",\n      \"label\": \"Queixa principal\",\n      \"type\": \"textarea\",\n      \"required\": true\n    },\n    {\n      \"key\": \"alergias\",\n      \"label\": \"Alergias\",\n      \"type\": \"multiselect\",\n      \"required\": false,\n      \"options\": [\n        \"dipirona\",\n        \"penicilina\"\n      ]\n    },\n    {\n      \"key\": \"fumante\",\n      \"label\": \"Fumante?\",\n      \"type\": \"boolean\",\n      \"required\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('templateId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Registrar anamnese",
           "request": {
             "method": "POST",
@@ -2122,10 +2162,10 @@
                 "anamnesis-records"
               ]
             },
-            "description": "Ficha livre em JSON. Guarda quem preencheu.",
+            "description": "Respostas validadas contra o formulário (tipos, obrigatórios, opções). Guarda quem preencheu; a ficha é imutável.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"answers\": {\n    \"queixa_principal\": \"Dor de cabeça recorrente\",\n    \"alergias\": [\n      \"dipirona\"\n    ],\n    \"fumante\": false\n  }\n}",
+              "raw": "{\n  \"templateId\": \"{{templateId}}\",\n  \"answers\": {\n    \"queixa_principal\": \"Dor de cabeça recorrente\",\n    \"alergias\": [\n      \"dipirona\"\n    ],\n    \"fumante\": false\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3122,7 +3162,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Clínica {{suffixB}}\",\n  \"subdomain\": \"clinica-{{suffixB}}\",\n  \"owner\": {\n    \"name\": \"Dono B\",\n    \"email\": \"dono-{{suffixB}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Clínica {{suffixB}}\",\n  \"subdomain\": \"clinica-{{suffixB}}\",\n  \"owner\": {\n    \"name\": \"Dono B\",\n    \"email\": \"dono-{{suffixB}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  },\n  \"legalAcceptance\": {\n    \"termsVersion\": \"1\",\n    \"privacyVersion\": \"1\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { pageOf } from '../common/pagination/page.js';
 import type { ListPlatformTenantsQueryDto } from './dto/list-platform-tenants-query.dto.js';
 import type { UpdateTenantStatusDto } from './dto/update-tenant-status.dto.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
+import { deletionAvailableAt } from '../tenants/tenant-closure.js';
 
 const TENANT_SUMMARY_SELECT = {
   id: true,
@@ -12,12 +15,16 @@ const TENANT_SUMMARY_SELECT = {
   customDomain: true,
   status: true,
   createdAt: true,
+  closureRequestedAt: true,
   _count: { select: { users: true, patients: true } },
 } as const;
 
 @Injectable()
 export class PlatformService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   // Ordem por nome com desempate por id (a paginação não repete nem pula clínicas).
   // SQL cru só para achar os ids da página: o Prisma não expressa unaccent/ILIKE por palavra.
@@ -61,6 +68,54 @@ export class PlatformService {
       where: { id },
       data: { status },
       select: { id: true, name: true, status: true },
+    });
+  }
+
+  // Exclusão definitiva de uma clínica e de todos os seus dados. Só depois de a própria clínica
+  // pedir o encerramento e de passada a carência (TENANT_DELETION_GRACE_DAYS) — a plataforma não
+  // apaga dados de clínica por conta própria. Sobra só o registro em TenantDeletion.
+  async deleteTenant(id: string, actor: AuthenticatedUser, confirmSubdomain: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      select: { id: true, name: true, subdomain: true, isPlatform: true, closureRequestedAt: true },
+    });
+    if (!tenant || tenant.isPlatform) {
+      throw new NotFoundException(`Tenant ${id} não encontrado`);
+    }
+    if (confirmSubdomain !== tenant.subdomain) {
+      throw new BadRequestException('confirmSubdomain não corresponde ao subdomínio da clínica');
+    }
+    if (!tenant.closureRequestedAt) {
+      throw new ConflictException('A clínica não pediu o encerramento da conta');
+    }
+    const availableAt = deletionAvailableAt(tenant.closureRequestedAt, this.config);
+    if (availableAt > new Date()) {
+      throw new ConflictException(
+        `A exclusão só é permitida a partir de ${availableAt.toISOString()} (carência do pedido de encerramento)`,
+      );
+    }
+
+    // Ordem importa: vários FKs são Restrict (anamnese -> usuário/formulário, agendamento ->
+    // profissional, cobrança/pagamento -> usuário, usuário -> papel) e barrariam a cascata direta
+    // a partir do tenant. O resto (papéis, marca, logo, auditoria, tokens, aceites) vai em cascata.
+    await this.prisma.$transaction(async (tx) => {
+      const where = { tenantId: id };
+      await tx.anamnesisRecord.deleteMany({ where });
+      await tx.anamnesisTemplate.deleteMany({ where });
+      await tx.charge.deleteMany({ where });
+      await tx.appointment.deleteMany({ where });
+      await tx.patient.deleteMany({ where });
+      await tx.user.deleteMany({ where });
+      await tx.tenant.delete({ where: { id } });
+      await tx.tenantDeletion.create({
+        data: {
+          tenantId: id,
+          name: tenant.name,
+          subdomain: tenant.subdomain,
+          closureRequestedAt: tenant.closureRequestedAt!,
+          deletedByUserId: actor.userId,
+        },
+      });
     });
   }
 

@@ -9,6 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service.js';
 // Cada execução usa um sufixo único e remove o que criou no final.
 const run = Date.now().toString(36);
 const PASSWORD = 'Senha@12345';
+const LEGAL = { termsVersion: '1', privacyVersion: '1' };
 
 interface Signup {
   tenantId: string;
@@ -37,6 +38,7 @@ describe('Autenticação e autorização (e2e)', () => {
         name: `Clinica ${name} ${run}`,
         subdomain: `clinica-${name}-${run}`,
         owner: { name: `Dono ${name}`, email, password: PASSWORD },
+        legalAcceptance: LEGAL,
       })
       .expect(201);
     const token = (await login(email).expect(200)).body.accessToken as string;
@@ -87,6 +89,7 @@ describe('Autenticação e autorização (e2e)', () => {
           name: 'Dup',
           subdomain: `dup-${run}`,
           owner: { name: 'Dup', email: a.email, password: PASSWORD },
+          legalAcceptance: LEGAL,
         })
         .expect(409);
     });

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  LEGAL,
   PASSWORD,
   cleanupTenants,
   createTestApp,
@@ -34,6 +35,7 @@ describe('Tradução de erros do banco (e2e)', () => {
         subdomain: (await ctx.prisma.tenant.findUniqueOrThrow({ where: { id: a.tenantId } }))
           .subdomain,
         owner: { name: 'Clone', email: `clone-${uniq()}@teste.com`, password: PASSWORD },
+        legalAcceptance: LEGAL,
       })
       .expect(409);
     expect(other.body.message).toMatch(/subdomínio/i);

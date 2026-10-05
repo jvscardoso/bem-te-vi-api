@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type Patient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
@@ -14,37 +16,55 @@ import {
 // Palavra da busca que só tem dígitos e pontuação de CPF ("123", "123.456", "123.456.789-01").
 const CPF_TOKEN = /^[\d.-]+$/;
 
+// Toda leitura e escrita de paciente e de registro clínico grava na trilha de auditoria
+// (AuditService): é o que permite à clínica responder "quem acessou os dados deste paciente?".
 @Injectable()
 export class PatientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  async create(tenantId: string, dto: CreatePatientDto) {
+  async create(tenantId: string, actor: AuthenticatedUser, dto: CreatePatientDto) {
     await this.assertCpfAvailable(tenantId, dto.cpf);
-    return this.prisma.patient.create({ data: { ...this.toData(dto), tenantId } });
-  }
-
-  findAll(tenantId: string, query: ListPatientsQueryDto) {
-    return this.paginate(tenantId, query, false);
-  }
-
-  findRemoved(tenantId: string, query: ListPatientsQueryDto) {
-    return this.paginate(tenantId, query, true);
-  }
-
-  async findOne(tenantId: string, id: string) {
-    const patient = await this.prisma.patient.findFirst({
-      where: { id, tenantId, deletedAt: null },
+    return this.prisma.$transaction(async (tx) => {
+      const patient = await tx.patient.create({ data: { ...this.toData(dto), tenantId } });
+      await this.audit.record(actor, { action: 'patient.create', patientId: patient.id }, tx);
+      return patient;
     });
-    if (!patient) {
-      throw new NotFoundException(`Paciente ${id} não encontrado`);
-    }
+  }
+
+  // A listagem expõe nome e CPF de vários pacientes: registra a busca feita (termo e página),
+  // não cada paciente da página.
+  async findAll(tenantId: string, actor: AuthenticatedUser, query: ListPatientsQueryDto) {
+    const page = await this.paginate(tenantId, query, false);
+    await this.audit.record(actor, { action: 'patient.list', details: this.listDetails(query, page.meta.total) });
+    return page;
+  }
+
+  async findRemoved(tenantId: string, actor: AuthenticatedUser, query: ListPatientsQueryDto) {
+    const page = await this.paginate(tenantId, query, true);
+    await this.audit.record(actor, { action: 'patient.list_removed', details: this.listDetails(query, page.meta.total) });
+    return page;
+  }
+
+  async findOne(tenantId: string, actor: AuthenticatedUser, id: string) {
+    const patient = await this.getActive(tenantId, id);
+    await this.audit.record(actor, { action: 'patient.view', patientId: id });
     return patient;
   }
 
-  async update(tenantId: string, id: string, dto: UpdatePatientDto) {
-    await this.findOne(tenantId, id);
+  // Registra o que mudou (de → para), campo a campo: a trilha guarda o histórico do cadastro,
+  // que o próprio registro (só o valor atual) não tem.
+  async update(tenantId: string, actor: AuthenticatedUser, id: string, dto: UpdatePatientDto) {
+    const before = await this.getActive(tenantId, id);
     await this.assertCpfAvailable(tenantId, dto.cpf, id);
-    return this.prisma.patient.update({ where: { id }, data: this.toData(dto) });
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.patient.update({ where: { id }, data: this.toData(dto) });
+      const changes = this.diff(before, after, Object.keys(dto) as (keyof Patient)[]);
+      await this.audit.record(actor, { action: 'patient.update', patientId: id, details: { changes } }, tx);
+      return after;
+    });
   }
 
   // `null` limpa o campo (contrato de todo PATCH). Precisa de tradução em dois casos:
@@ -58,16 +78,16 @@ export class PatientsService {
     };
   }
 
-  async remove(tenantId: string, id: string) {
-    await this.findOne(tenantId, id);
-    await this.prisma.patient.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+  async remove(tenantId: string, actor: AuthenticatedUser, id: string) {
+    await this.getActive(tenantId, id);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.patient.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(actor, { action: 'patient.delete', patientId: id }, tx);
     });
   }
 
   // Desfaz o soft delete. O CPF nunca foi liberado, então não há conflito possível ao voltar.
-  async restore(tenantId: string, id: string) {
+  async restore(tenantId: string, actor: AuthenticatedUser, id: string) {
     const removed = await this.prisma.patient.findFirst({
       where: { id, tenantId, deletedAt: { not: null } },
       select: { id: true },
@@ -75,7 +95,38 @@ export class PatientsService {
     if (!removed) {
       throw new NotFoundException(`Paciente removido ${id} não encontrado`);
     }
-    return this.prisma.patient.update({ where: { id }, data: { deletedAt: null } });
+    return this.prisma.$transaction(async (tx) => {
+      const patient = await tx.patient.update({ where: { id }, data: { deletedAt: null } });
+      await this.audit.record(actor, { action: 'patient.restore', patientId: id }, tx);
+      return patient;
+    });
+  }
+
+  // Leitura interna (sem auditoria): checagem de existência antes de alterar, que já é
+  // auditada pela própria alteração.
+  private async getActive(tenantId: string, id: string) {
+    const patient = await this.prisma.patient.findFirst({ where: { id, tenantId, deletedAt: null } });
+    if (!patient) {
+      throw new NotFoundException(`Paciente ${id} não encontrado`);
+    }
+    return patient;
+  }
+
+  private listDetails(query: ListPatientsQueryDto, total: number) {
+    return { q: query.q ?? null, page: query.page, pageSize: query.pageSize, total };
+  }
+
+  // Só os campos enviados que de fato mudaram. Datas e JSON comparados pelo valor serializado.
+  private diff(before: Patient, after: Patient, fields: (keyof Patient)[]) {
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const field of fields) {
+      const from = before[field] ?? null;
+      const to = after[field] ?? null;
+      if (JSON.stringify(from) !== JSON.stringify(to)) {
+        changes[field] = { from, to } as { from: unknown; to: unknown };
+      }
+    }
+    return JSON.parse(JSON.stringify(changes)) as Prisma.InputJsonObject;
   }
 
   // O CPF de um paciente removido continua reservado (para não duplicar o cadastro/prontuário).
@@ -162,13 +213,15 @@ export class PatientsService {
     return Prisma.join(conditions, ' AND ');
   }
 
+  // O conteúdo clínico não vai para a trilha (ficaria duplicado num lugar com outro controle de
+  // acesso): o registro aponta para a ficha criada, que é imutável.
   async addAnamnesisRecord(
     tenantId: string,
+    actor: AuthenticatedUser,
     patientId: string,
-    filledByUserId: string,
     dto: CreateAnamnesisRecordDto,
   ) {
-    await this.findOne(tenantId, patientId);
+    await this.getActive(tenantId, patientId);
     // O FK do banco só garante que o template existe, não que é deste tenant nem que
     // `answers` bate com os campos dele — as duas coisas checadas aqui, não no banco.
     const template = await this.prisma.anamnesisTemplate.findFirst({
@@ -183,24 +236,38 @@ export class PatientsService {
       throw new BadRequestException(errors);
     }
 
-    return this.prisma.anamnesisRecord.create({
-      data: {
-        tenantId,
-        patientId,
-        templateId: dto.templateId,
-        filledByUserId,
-        answers: dto.answers as Prisma.InputJsonValue,
-      },
-      include: { template: { select: { id: true, name: true } } },
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.anamnesisRecord.create({
+        data: {
+          tenantId,
+          patientId,
+          templateId: dto.templateId,
+          filledByUserId: actor.userId,
+          answers: dto.answers as Prisma.InputJsonValue,
+        },
+        include: { template: { select: { id: true, name: true } } },
+      });
+      await this.audit.record(
+        actor,
+        { action: 'clinical_record.create', patientId, entityType: 'anamnesis_record', entityId: record.id },
+        tx,
+      );
+      return record;
     });
   }
 
-  async listAnamnesisRecords(tenantId: string, patientId: string) {
-    await this.findOne(tenantId, patientId);
-    return this.prisma.anamnesisRecord.findMany({
+  async listAnamnesisRecords(tenantId: string, actor: AuthenticatedUser, patientId: string) {
+    await this.getActive(tenantId, patientId);
+    const records = await this.prisma.anamnesisRecord.findMany({
       where: { tenantId, patientId },
       orderBy: { createdAt: 'desc' },
       include: { template: { select: { id: true, name: true } } },
     });
+    await this.audit.record(actor, {
+      action: 'clinical_record.list',
+      patientId,
+      details: { count: records.length },
+    });
+    return records;
   }
 }

@@ -9,6 +9,7 @@ import { hash } from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
 import { DnsTxtResolver } from './dns-txt-resolver.js';
+import { LegalService } from '../legal/legal.service.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
 import { UpdateTenantBrandingDto } from './dto/update-tenant-branding.dto.js';
@@ -25,9 +26,12 @@ export class TenantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dnsTxtResolver: DnsTxtResolver,
+    private readonly legal: LegalService,
   ) {}
 
-  async create({ owner, ...tenantData }: CreateTenantDto) {
+  async create({ owner, legalAcceptance, ...tenantData }: CreateTenantDto) {
+    // Antes de qualquer escrita: versão desatualizada é erro do cliente (400), não da transação.
+    this.legal.assertCurrent(legalAcceptance);
     const email = owner.email.toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -83,6 +87,8 @@ export class TenantsService {
         },
         omit: USER_SECRET_FIELDS,
       });
+
+      await this.legal.record(tx, ownerUser, legalAcceptance);
 
       return { tenant, role: { id: role.id, name: role.name }, owner: ownerUser };
     });

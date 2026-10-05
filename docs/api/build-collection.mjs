@@ -105,6 +105,8 @@ const autenticacao = folder(
         name: 'Clínica {{suffix}}',
         subdomain: 'clinica-{{suffix}}',
         owner: { name: 'Dono {{suffix}}', email: 'dono-{{suffix}}@exemplo.com', password: '{{password}}' },
+        // Versões vigentes padrão (LEGAL_TERMS_VERSION / LEGAL_PRIVACY_VERSION sem definir).
+        legalAcceptance: { termsVersion: '1', privacyVersion: '1' },
       },
       test: [
         status(201),
@@ -125,7 +127,7 @@ const autenticacao = folder(
         status(200),
         json,
         set('accessToken', 'b.accessToken'),
-        check('o dono tem as 7 permissões', 'b.user.permissions.length === 7'),
+        check('o dono tem as permissões da clínica, nunca as de plataforma', "b.user.permissions.includes('patients:write') && b.user.permissions.includes('audit:read') && !b.user.permissions.some((k) => k.startsWith('platform:'))"),
       ],
     }),
     req('Login com senha errada', 'POST', '/auth/login', {
@@ -198,10 +200,12 @@ const clinica = folder(
         check('nome fantasia', "b.tradeName === 'Clínica Sorriso'"),
       ],
     }),
-    req('Marca pública — por domínio próprio', 'GET', '/public/branding', {
+    req('Marca pública — domínio próprio ainda não verificado', 'GET', '/public/branding', {
       auth: 'none',
+      description:
+        'Um domínio próprio só passa a controlar a marca depois de verificado por DNS (registro TXT, ver GET /tenants/:id/domain). Sem isso, quem declarasse o domínio de outra empresa controlaria a marca exibida nele.',
       query: [['host', '{{customDomain}}']],
-      test: [status(200), json, check('mesma clínica', "b.tradeName === 'Clínica Sorriso'")],
+      test: [status(404)],
     }),
     req('Marca pública — host inexistente', 'GET', '/public/branding', {
       auth: 'none',
@@ -221,7 +225,7 @@ const papeis = folder(
       test: [
         status(200),
         json,
-        "const admin = b.find((r) => r.name === 'Admin');",
+        "const admin = b.data.find((r) => r.name === 'Admin');",
         "const id = (key) => admin.permissions.find((p) => p.permission.key === key).permission.id;",
         set('permPatientsRead', "id('patients:read')"),
         set('permPatientsWrite', "id('patients:write')"),
@@ -230,7 +234,7 @@ const papeis = folder(
         set('permUsersManage', "id('users:manage')"),
         set('permRolesManage', "id('roles:manage')"),
         set('permTenantManage', "id('tenant:manage')"),
-        check('o papel Admin tem as 7 permissões', 'admin.permissions.length === 7'),
+        check('o papel Admin tem as permissões da clínica, nunca as de plataforma', "admin.permissions.length > 0 && !admin.permissions.some((p) => p.permission.key.startsWith('platform:'))"),
       ],
     }),
     req('Criar papel "Gestor"', 'POST', '/tenants/{{tenantId}}/roles', {
@@ -275,7 +279,7 @@ const usuarios = folder(
   'Cria o usuário "Gestor" (também é o profissional que atende na agenda) e mostra a duração própria de atendimento.',
   [
     req('Listar usuários', 'GET', '/tenants/{{tenantId}}/users', {
-      test: [status(200), json, check('só o dono por enquanto', 'b.length === 1 && b[0].passwordHash === undefined')],
+      test: [status(200), json, check('só o dono por enquanto', 'b.data.length === 1 && b.meta.total === 1 && b.data[0].passwordHash === undefined')],
     }),
     req('Criar usuário (Gestor)', 'POST', '/tenants/{{tenantId}}/users', {
       description: 'O papel precisa ser do mesmo tenant e ter só permissões que quem cria também possui.',
@@ -454,9 +458,22 @@ const pacientes = folder(
       body: { phone: '(11) 98888-7777' },
       test: [status(200), json, check('telefone novo e nome preservado', "b.phone === '(11) 98888-7777' && b.fullName === 'Maria da Silva'")],
     }),
-    req('Registrar anamnese', 'POST', '/tenants/{{tenantId}}/patients/{{patientId}}/anamnesis-records', {
-      description: 'Ficha livre em JSON. Guarda quem preencheu.',
+    req('Criar formulário de anamnese', 'POST', '/tenants/{{tenantId}}/anamnesis-templates', {
+      description: 'Cada clínica define os campos da ficha (chave, rótulo, tipo, obrigatório, opções). As respostas são validadas contra ele.',
       body: {
+        name: 'Ficha padrão {{suffix}}',
+        fields: [
+          { key: 'queixa_principal', label: 'Queixa principal', type: 'textarea', required: true },
+          { key: 'alergias', label: 'Alergias', type: 'multiselect', required: false, options: ['dipirona', 'penicilina'] },
+          { key: 'fumante', label: 'Fumante?', type: 'boolean', required: false },
+        ],
+      },
+      test: [status(201), json, set('templateId', 'b.id')],
+    }),
+    req('Registrar anamnese', 'POST', '/tenants/{{tenantId}}/patients/{{patientId}}/anamnesis-records', {
+      description: 'Respostas validadas contra o formulário (tipos, obrigatórios, opções). Guarda quem preencheu; a ficha é imutável.',
+      body: {
+        templateId: '{{templateId}}',
         answers: { queixa_principal: 'Dor de cabeça recorrente', alergias: ['dipirona'], fumante: false },
       },
       test: [status(201), json, check('autor registrado', 'b.filledByUserId === pm.collectionVariables.get("ownerId")')],
@@ -613,6 +630,8 @@ const isolamento = folder(
         name: 'Clínica {{suffixB}}',
         subdomain: 'clinica-{{suffixB}}',
         owner: { name: 'Dono B', email: 'dono-{{suffixB}}@exemplo.com', password: '{{password}}' },
+        // Versões vigentes padrão (LEGAL_TERMS_VERSION / LEGAL_PRIVACY_VERSION sem definir).
+        legalAcceptance: { termsVersion: '1', privacyVersion: '1' },
       },
       test: [status(201), json, set('tenantBId', 'b.tenant.id'), set('ownerBId', 'b.owner.id'), set('ownerBEmail', 'b.owner.email')],
     }),

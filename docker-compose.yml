@@ -50,6 +50,11 @@ services:
       MAIL_FROM: ${MAIL_FROM:-bem-te-vi <nao-responda@bemtevi.local>}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:${PORT:-3000}}
+      LEGAL_TERMS_VERSION: ${LEGAL_TERMS_VERSION:-1}
+      LEGAL_PRIVACY_VERSION: ${LEGAL_PRIVACY_VERSION:-1}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      TENANT_DELETION_GRACE_DAYS: ${TENANT_DELETION_GRACE_DAYS:-30}
+      PLATFORM_CONTACT_EMAIL: ${PLATFORM_CONTACT_EMAIL:-}
     ports:
       - '${PORT:-3000}:3000'
 

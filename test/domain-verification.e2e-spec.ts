@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DnsTxtResolver } from '../src/tenants/dns-txt-resolver.js';
 import {
+  LEGAL,
   PASSWORD,
   cleanupTenants,
   createTestApp,
@@ -88,6 +89,7 @@ describe('Verificação de domínio próprio (e2e)', () => {
           subdomain: `clinica-tok-${uniq()}`,
           customDomain: domain,
           owner: { name: 'Dono', email, password: PASSWORD },
+          legalAcceptance: LEGAL,
         })
         .expect(201);
       tenantIds.push(signup.body.tenant.id);

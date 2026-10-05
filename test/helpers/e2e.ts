@@ -25,6 +25,10 @@ export class FakeEmailSender extends EmailSender {
 
 export const PASSWORD = 'Senha@12345';
 
+// Versões vigentes de Termos/Política no ambiente de teste (padrão de LegalService quando
+// LEGAL_TERMS_VERSION / LEGAL_PRIVACY_VERSION não estão definidas).
+export const LEGAL = { termsVersion: '1', privacyVersion: '1' };
+
 // Sufixo único por execução/arquivo: emails e subdomains são únicos globalmente no banco,
 // e os arquivos de e2e rodam em paralelo contra o mesmo Postgres.
 export const uniq = () => randomUUID().slice(0, 8);
@@ -99,6 +103,7 @@ export async function signupTenant(http: Http, label: string): Promise<TestTenan
       name: `Clinica ${label} ${suffix}`,
       subdomain: `clinica-${label}-${suffix}`,
       owner: { name: `Dono ${label}`, email, password: PASSWORD },
+      legalAcceptance: LEGAL,
     })
     .expect(201);
   const owner = await loginAs(http, email);
@@ -200,4 +205,6 @@ export async function cleanupTenants(prisma: PrismaService, tenantIds: (string |
   await prisma.patient.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.user.deleteMany({ where: { tenantId: { in: ids } } });
   await prisma.tenant.deleteMany({ where: { id: { in: ids } } });
+  // Prova de exclusão (sem FK): só existe para clínicas excluídas pelo painel da plataforma.
+  await prisma.tenantDeletion.deleteMany({ where: { tenantId: { in: ids } } });
 }

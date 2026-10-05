@@ -10,6 +10,7 @@ import { TenantAccessGuard } from './guards/tenant-access.guard.js';
 import { PermissionsGuard } from './guards/permissions.guard.js';
 import { TenantsModule } from '../tenants/tenants.module.js';
 import { AccountModule } from '../account/account.module.js';
+import { LegalModule } from '../legal/legal.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,8 @@ import { AccountModule } from '../account/account.module.js';
     TenantsModule,
     // Tokens e emails de recuperação de senha e convite.
     AccountModule,
+    // Aceite de Termos/Política no convite e em /auth/me.
+    LegalModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

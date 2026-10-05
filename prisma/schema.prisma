@@ -46,6 +46,11 @@ model Tenant {
   // (ex.: estética 30 min; psicologia com mínimo de 60 min).
   defaultAppointmentDurationMinutes Int @default(30) @map("default_appointment_duration_minutes")
   minAppointmentDurationMinutes     Int @default(5)  @map("min_appointment_duration_minutes")
+  // Pedido de encerramento da conta feito pela própria clínica (ver TenantClosureService).
+  // A clínica continua funcionando durante a carência (para exportar os dados ou desistir);
+  // depois dela, a plataforma pode excluir tudo definitivamente.
+  closureRequestedAt       DateTime? @map("closure_requested_at")
+  closureRequestedByUserId String?   @map("closure_requested_by_user_id")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
@@ -56,8 +61,24 @@ model Tenant {
   patients      Patient[]
   appointments  Appointment[]
   anamnesisTemplates AnamnesisTemplate[]
+  auditLogs     AuditLog[]
 
   @@map("tenants")
+}
+
+// Prova de que uma clínica foi excluída, quando, a pedido de quando e por qual admin da
+// plataforma. Fica de fora do tenant de propósito (sem FK): é o único registro que sobra
+// depois que todos os dados da clínica são apagados.
+model TenantDeletion {
+  id                 String   @id @default(uuid())
+  tenantId           String   @map("tenant_id")
+  name               String   @db.VarChar(150)
+  subdomain          String   @db.VarChar(63)
+  closureRequestedAt DateTime @map("closure_requested_at")
+  deletedByUserId    String   @map("deleted_by_user_id")
+  deletedAt          DateTime @default(now()) @map("deleted_at")
+
+  @@map("tenant_deletions")
 }
 
 model TenantBranding {
@@ -126,9 +147,34 @@ model User {
   chargesCreated Charge[]
   paymentsRecorded Payment[]
   tokens        UserToken[]
+  legalAcceptances LegalAcceptance[]
 
   @@index([tenantId])
   @@map("users")
+}
+
+enum LegalDocument {
+  terms
+  privacy
+}
+
+// Aceite de Termos de Uso / Política de Privacidade (LGPD): prova de qual versão cada pessoa
+// aceitou, quando e de onde. Um registro por aceite (nunca sobrescrito): quando a versão muda,
+// o novo aceite vira outra linha e o histórico fica.
+model LegalAcceptance {
+  id         String        @id @default(uuid())
+  userId     String        @map("user_id")
+  tenantId   String        @map("tenant_id")
+  document   LegalDocument
+  version    String        @db.VarChar(50)
+  ip         String?       @db.VarChar(64)
+  userAgent  String?       @map("user_agent") @db.VarChar(300)
+  acceptedAt DateTime      @default(now()) @map("accepted_at")
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, document])
+  @@map("legal_acceptances")
 }
 
 enum UserTokenType {
@@ -193,6 +239,34 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+// Trilha de auditoria (LGPD): quem acessou ou alterou dado de paciente, quando e de onde.
+// Só é escrita pela aplicação, nunca editada: um trigger no banco recusa UPDATE (ver a migration
+// audit_log). Não tem FK para usuário nem paciente de propósito — o registro precisa sobreviver
+// ao que referencia e não pode ser reescrito por cascata; só some junto com a clínica.
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  actorUserId String   @map("actor_user_id")
+  // Ex.: patient.view, patient.update, clinical_record.list (ver AuditAction).
+  action      String   @db.VarChar(60)
+  // Paciente envolvido, quando há um: é por ele que a clínica responde "quem viu meus dados?".
+  patientId   String?  @map("patient_id")
+  entityType  String?  @map("entity_type") @db.VarChar(40)
+  entityId    String?  @map("entity_id")
+  // Detalhes da ação: campos alterados (de → para), termo buscado, etc. Nunca conteúdo clínico.
+  details     Json?
+  ip          String?  @db.VarChar(64)
+  userAgent   String?  @map("user_agent") @db.VarChar(300)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, patientId, createdAt])
+  @@index([tenantId, actorUserId, createdAt])
+  @@map("audit_logs")
 }
 
 // =============================================================================

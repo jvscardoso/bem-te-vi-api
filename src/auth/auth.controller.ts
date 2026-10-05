@@ -5,6 +5,8 @@ import { LoginDto } from './dto/login.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { TokenPasswordDto } from './dto/token-password.dto.js';
+import { AcceptInviteDto } from './dto/accept-invite.dto.js';
+import { LegalAcceptanceDto } from '../legal/dto/legal-acceptance.dto.js';
 import { Public } from './decorators/public.decorator.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from './types/auth.types.js';
@@ -36,6 +38,13 @@ export class AuthController {
     return this.authService.changePassword(user, dto);
   }
 
+  // Aceite de uma versão nova dos Termos/Política (ver pendingLegalDocuments em GET /auth/me).
+  @HttpCode(HttpStatus.OK)
+  @Post('me/legal-acceptances')
+  acceptLegal(@CurrentUser() user: AuthenticatedUser, @Body() dto: LegalAcceptanceDto) {
+    return this.authService.acceptLegal(user, dto);
+  }
+
   // 204 sempre, exista ou não a conta (não serve para descobrir emails cadastrados). O limite
   // também evita usar a rota para encher a caixa de alguém de emails.
   @Public()
@@ -58,7 +67,7 @@ export class AuthController {
   @Throttle(STRICT)
   @HttpCode(HttpStatus.OK)
   @Post('accept-invite')
-  acceptInvite(@Body() dto: TokenPasswordDto) {
+  acceptInvite(@Body() dto: AcceptInviteDto) {
     return this.authService.acceptInvite(dto);
   }
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  LEGAL,
   PASSWORD,
   cleanupTenants,
   createPatient,
@@ -129,6 +130,7 @@ describe('Backoffice da plataforma (e2e)', () => {
           subdomain,
           ...(customDomain ? { customDomain } : {}),
           owner: { name: 'Dono', email: `dono-${uniq()}@teste.com`, password: PASSWORD },
+          legalAcceptance: LEGAL,
         })
         .expect(201);
       managedTenantIds.push(res.body.tenant.id);

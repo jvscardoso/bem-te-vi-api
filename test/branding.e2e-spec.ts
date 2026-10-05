@@ -1,5 +1,6 @@
 import { DnsTxtResolver } from '../src/tenants/dns-txt-resolver.js';
 import {
+  LEGAL,
   PASSWORD,
   cleanupTenants,
   createTestApp,
@@ -161,6 +162,8 @@ describe('Branding / whitelabel (e2e)', () => {
         subdomain: `clinica-dom-${suffix}`,
         customDomain,
         owner: { name: 'Dono', email: `dono-dom-${suffix}@teste.com`, password: PASSWORD },
+
+        legalAcceptance: LEGAL,
       });
 
       for (const invalid of ['não é domínio', 'https://agenda.exemplo.com.br', 'localhost', 'a b.com']) {

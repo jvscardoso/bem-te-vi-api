@@ -14,10 +14,12 @@ import { AppointmentsModule } from './appointments/appointments.module.js';
 import { AnamnesisTemplatesModule } from './anamnesis-templates/anamnesis-templates.module.js';
 import { PlatformModule } from './platform/platform.module.js';
 import { BillingModule } from './billing/billing.module.js';
+import { AuditModule } from './audit/audit.module.js';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard.js';
 import { TenantAccessGuard } from './auth/guards/tenant-access.guard.js';
 import { PermissionsGuard } from './auth/guards/permissions.guard.js';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware.js';
+import { RequestContextMiddleware } from './common/request-context/request-context.middleware.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
 
 @Module({
@@ -34,6 +36,7 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.
     AnamnesisTemplatesModule,
     PlatformModule,
     BillingModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [
@@ -48,6 +51,7 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestLoggerMiddleware).forRoutes('*');
+    // RequestContext primeiro: tudo depois dele (inclusive a auditoria) enxerga IP e navegador.
+    consumer.apply(RequestContextMiddleware, RequestLoggerMiddleware).forRoutes('*');
   }
 }

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EmailSender } from '../mail/email-sender.js';
+import { escapeHtml } from '../common/escape-html.js';
 
 // Rotas do frontend que recebem o token (?token=...).
 const RESET_PATH = '/reset-password';
@@ -106,14 +107,4 @@ export class AccountMailerService {
     }
     return url.toString();
   }
-}
-
-// Nome da clínica e do usuário vêm de cadastro (texto livre): escapados no HTML do email.
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

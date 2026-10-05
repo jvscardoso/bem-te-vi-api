@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Query } from '@nestjs/common';
 import { PlatformService } from './platform.service.js';
 import { ListPlatformTenantsQueryDto } from './dto/list-platform-tenants-query.dto.js';
 import { UpdateTenantStatusDto } from './dto/update-tenant-status.dto.js';
+import { DeleteTenantDto } from './dto/delete-tenant.dto.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 
 // Backoffice da plataforma: gerencia as clínicas como contas (listar, suspender/reativar).
@@ -21,5 +24,16 @@ export class PlatformController {
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateTenantStatusDto) {
     return this.platformService.updateTenantStatus(id, dto);
+  }
+
+  // Exclusão definitiva (sem volta). Só para clínica que pediu o encerramento, depois da carência.
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':id')
+  deleteTenant(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body() dto: DeleteTenantDto,
+  ) {
+    return this.platformService.deleteTenant(id, actor, dto.confirmSubdomain);
   }
 }

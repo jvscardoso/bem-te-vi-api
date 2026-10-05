@@ -12,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CreateTenantOwnerDto } from './create-tenant-owner.dto.js';
+import { LegalAcceptanceDto } from '../../legal/dto/legal-acceptance.dto.js';
 
 export class CreateTenantDto {
   @IsString()
@@ -51,4 +52,11 @@ export class CreateTenantDto {
   @ValidateNested()
   @Type(() => CreateTenantOwnerDto)
   owner!: CreateTenantOwnerDto;
+
+  // O dono aceita os Termos de Uso e a Política de Privacidade vigentes (GET /public/legal) em
+  // nome da clínica. Obrigatório: sem aceite registrado não há cadastro.
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LegalAcceptanceDto)
+  legalAcceptance!: LegalAcceptanceDto;
 }

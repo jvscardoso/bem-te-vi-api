@@ -1,4 +1,5 @@
 import {
+  LEGAL,
   FakeEmailSender,
   PASSWORD,
   cleanupTenants,
@@ -35,7 +36,7 @@ describe('Emails de conta: recuperação de senha e convite (e2e)', () => {
   const reset = (token: string, password = NEW_PASSWORD) =>
     ctx.http().post('/auth/reset-password').send({ token, password });
   const accept = (token: string, password = NEW_PASSWORD) =>
-    ctx.http().post('/auth/accept-invite').send({ token, password });
+    ctx.http().post('/auth/accept-invite').send({ token, password, legalAcceptance: LEGAL });
   const login = (email: string, password: string) => ctx.http().post('/auth/login').send({ email, password });
   const lastEmailTo = async (email: string) => {
     await vi.waitFor(() => expect(mail.to(email).length).toBeGreaterThan(0), WAIT);

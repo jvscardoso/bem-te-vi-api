@@ -1,11 +1,27 @@
 # bem-te-vi-api
 
-API do bem-te-vi — SaaS whitelabel de gestão de clínicas e hospitais (agenda de consultas, cadastro de pacientes com anamnese, multi-tenant com permissões por papel).
+API do bem-te-vi — SaaS whitelabel de gestão de clínicas: marca e endereço próprios por clínica, usuários e papéis com permissões, pacientes com anamnese configurável, agenda, financeiro, painel da plataforma e recursos de LGPD (trilha de auditoria, aceite de termos, exportação e encerramento de conta).
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| [docs/status.md](docs/status.md) | **Comece por aqui:** o que está pronto, o que falta para lançar, decisões pendentes, limitações conhecidas |
+| [docs/arquitetura.md](docs/arquitetura.md) | Módulos, pipeline da requisição (guards, validação, erros), padrões de projeto, segurança, infraestrutura e testes |
+| [docs/banco-de-dados.md](docs/banco-de-dados.md) | Modelo de dados, integridade, SQL fora do Prisma, histórico de migrations |
+| [docs/regras-de-negocio.md](docs/regras-de-negocio.md) | Regras de negócio por domínio |
+| [docs/decisoes/](docs/decisoes/) | Decisões de produto pendentes, com opções e recomendação |
+| `docs/changes/` | Tasks para o frontend (fora do git; enviadas ao repositório do front) |
+| [docs/api/](docs/api/) | Coleção do Postman e o gerador dela |
+
+Este README cobre como rodar o projeto e o contrato da API por domínio.
 
 ## Stack
 
-- Node.js + NestJS
-- PostgreSQL + Prisma ORM (driver adapter `@prisma/adapter-pg`)
+- Node.js 24 + NestJS 12 (TypeScript, ESM)
+- PostgreSQL 15+ + Prisma 7 (driver adapter `@prisma/adapter-pg`)
+- Email por SMTP (nodemailer); Mailpit em dev
+- Testes: Vitest (unitários e e2e com supertest), coleção do Postman (newman); lint com oxlint
 
 ## Rodando localmente
 
@@ -60,33 +76,34 @@ Na subida, o container aplica as migrations (`prisma migrate deploy`) e o seed d
 
 Notas para deploy:
 - Imagem multi-stage (`node:24-bookworm-slim`), roda como usuário não-root, com `HEALTHCHECK` em `GET /` e shutdown gracioso no SIGTERM.
-- Configuração toda por variável de ambiente (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`, `APP_BASE_DOMAIN`, `SMTP_*`, `MAIL_FROM`, `FRONTEND_URL`, `API_PUBLIC_URL` — ver `.env.example`); `.env` nunca entra na imagem.
+- Configuração toda por variável de ambiente (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`, `APP_BASE_DOMAIN`, `TRUST_PROXY`, `SMTP_*`, `MAIL_FROM`, `FRONTEND_URL`, `API_PUBLIC_URL`, `LEGAL_*_VERSION`, `TENANT_DELETION_GRACE_DAYS`, `PLATFORM_CONTACT_EMAIL` — ver `.env.example`); `.env` nunca entra na imagem.
 - Migrate + seed rodam em cada start do container. Com mais de uma réplica, mova essa etapa para um passo único de release.
 - A imagem mantém o `node_modules` completo (CLI do Prisma e `tsx` para migrate/seed), então fica grande (~1 GB); dá para enxugar depois separando um job de migração.
 
 ## Modelo de dados
 
-Fonte da verdade: `prisma/schema.prisma`. Cobre tenancy/branding (whitelabel), usuários e papéis com permissões, pacientes com ficha de anamnese (soft delete) e agenda de consultas.
+Fonte da verdade: `prisma/schema.prisma`; explicação completa em [docs/banco-de-dados.md](docs/banco-de-dados.md). Cobre clínicas (marca, logo, domínio próprio, encerramento), usuários e papéis com permissões, tokens de email, aceites de termos, pacientes com formulários e fichas de anamnese (soft delete), agenda, cobranças e pagamentos, e a trilha de auditoria.
 
 ## Estrutura
 
-Cada domínio de negócio é um módulo Nest em `src/` (`tenants`, `users`, `roles`, `patients`, `appointments`), todos falando com o banco via `PrismaService` (`src/prisma`).
+Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
 
 Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 
 ## Onboarding de um tenant novo
 
-`POST /tenants` é pública e cria, numa transação só, o tenant + uma role "Admin" (com todas as permissões do catálogo) + o usuário dono:
+`POST /tenants` é pública e cria, numa transação só, o tenant + uma role "Admin" (com todas as permissões do catálogo, exceto as `platform:*`) + o usuário dono:
 
 ```json
 {
   "name": "Clínica Exemplo",
   "subdomain": "clinica-exemplo",
-  "owner": { "name": "Fulano", "email": "fulano@clinica.com", "password": "..." }
+  "owner": { "name": "Fulano", "email": "fulano@clinica.com", "password": "..." },
+  "legalAcceptance": { "termsVersion": "1", "privacyVersion": "1" }
 }
 ```
 
-Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
+`legalAcceptance` é o aceite dos Termos de Uso e da Política de Privacidade vigentes (ver "Termos de Uso e Política de Privacidade"). Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
 
 ## Pacientes
 
@@ -240,6 +257,57 @@ Outros ajustes: permissão inexistente em `permissionIds` responde 400 (antes va
 
 **Listagem e paginação.** `GET /tenants/:tenantId/users` e `GET /tenants/:tenantId/roles` são paginados (mesmo padrão de pacientes/agenda: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" } }`, `page` padrão `1`, `pageSize` padrão `20` e máximo `100`; parâmetro inválido ou desconhecido → `400`). Ordenados por nome, com desempate por id. Sem busca por texto por enquanto (`q`) — são listas tipicamente pequenas por clínica; se isso mudar, adicionar do mesmo jeito que em pacientes.
 
+## Trilha de auditoria — LGPD (`src/audit`)
+
+Dado de saúde é dado pessoal sensível. A clínica precisa conseguir responder **"quem acessou os dados deste paciente?"** e investigar acesso indevido. Toda leitura e escrita de paciente e de registro clínico grava um registro em `AuditLog`:
+
+| Ação | Quando | `details` |
+|---|---|---|
+| `patient.view` | `GET /patients/:id` | — |
+| `patient.list` / `patient.list_removed` | listagem/busca | termo buscado (`q`), página, total — não cada paciente da página |
+| `patient.create` / `patient.delete` / `patient.restore` | escrita | — |
+| `patient.update` | `PATCH /patients/:id` | `changes`: só os campos que mudaram, de → para (é o histórico do cadastro, que o registro em si não tem) |
+| `clinical_record.create` / `clinical_record.list` | ficha de anamnese | id da ficha / quantidade — **nunca o conteúdo clínico**, que ficaria duplicado num lugar com outro controle de acesso |
+
+Cada registro guarda quem (`actorUserId`), paciente, quando, IP e navegador (via `RequestContext`, um `AsyncLocalStorage` preenchido por middleware). Agenda e financeiro ficam de fora por ora (volume alto, dado menos sensível).
+
+- **Síncrono e transacional:** nas escritas, o registro entra na mesma transação da alteração; nas leituras, é gravado antes da resposta. Se a auditoria falhar, a requisição falha — acesso a dado de saúde sem registro não acontece em silêncio. Acesso que falha (ex.: `404`) não gera registro.
+- **Imutável:** um trigger no banco recusa `UPDATE` em `audit_logs`, e a API não tem rota que altere ou apague. Sem FK para usuário nem paciente, de propósito: o registro sobrevive a quem referencia e não é reescrito por cascata; só some junto com a clínica.
+- **Consulta:** `GET /tenants/:tenantId/audit-logs` (permissão nova `audit:read`), paginada, do mais recente para o mais antigo, com filtros `patientId`, `actorUserId`, `action`, `from`/`to`. Traz `actor: { id, name }`. A migration deu `audit:read` só a papéis de administrador (`users:manage` + `roles:manage` + `tenant:manage`): a trilha revela quem atendeu quem, então não vai para a equipe toda.
+- **IP atrás de proxy:** em produção, defina `TRUST_PROXY` (número de proxies na frente da API). Sem isso, `req.ip` é o IP do proxy — a auditoria grava o IP errado e o **rate limit** passa a tratar todos os usuários como um só cliente.
+- **Retenção:** os registros ficam enquanto a clínica existir. Política de retenção/expurgo é uma decisão a tomar junto com o encerramento de conta.
+
+## Termos de Uso e Política de Privacidade — LGPD (`src/legal`)
+
+A API guarda a **prova de aceite**: quem aceitou qual versão de cada documento, quando, de qual IP e navegador (`LegalAcceptance`, um registro por aceite, nunca sobrescrito). Os **textos** ficam no frontend e precisam ser escritos por um advogado; aqui só existe a versão vigente de cada um, configurada por `LEGAL_TERMS_VERSION` e `LEGAL_PRIVACY_VERSION` (padrão `1`).
+
+- `GET /public/legal` (pública) → `{ terms: { version }, privacy: { version } }`. A tela de cadastro e a de aceite de convite usam para enviar as versões que a pessoa viu.
+- **Obrigatório no cadastro da clínica** (`POST /tenants`, campo `legalAcceptance: { termsVersion, privacyVersion }`) e no **aceite de convite** (`POST /auth/accept-invite`, mesmo campo). Versão ausente ou diferente da vigente → `400`, e nada é criado — no convite, o link não é gasto. O aceite entra na mesma transação que cria a conta.
+- **Pendências:** `GET /auth/me` traz `pendingLegalDocuments` (`terms`/`privacy` cuja versão vigente o usuário ainda não aceitou) — usuário criado com senha pelo admin, ou versão nova publicada. `POST /auth/me/legal-acceptances` (`{ termsVersion, privacyVersion }`) registra o aceite e devolve as pendências restantes.
+- **Publicar versão nova:** mudou o texto, suba a variável correspondente. Todo mundo passa a ter pendência daquele documento, e o histórico de aceites anteriores fica.
+- **A API não bloqueia as demais rotas** enquanto há pendência: o bloqueio é do frontend (modal de aceite). Bloquear na API derrubaria integrações e scripts no dia de uma versão nova; o que a lei pede é a prova do aceite, que fica registrada.
+
+## Exportação dos dados do paciente — LGPD
+
+`GET /tenants/:tenantId/patients/:id/export` (permissão nova `patients:export`) baixa um JSON (`Content-Disposition: attachment`, `Cache-Control: no-store`) com tudo o que a clínica guarda sobre o paciente: cadastro, fichas de anamnese, agendamentos e cobranças com pagamentos. É como a clínica atende o **direito de acesso e de portabilidade do titular**.
+
+- **Legível sem o sistema:** as respostas das fichas saem na ordem do formulário, com o **rótulo** de cada campo (`{ key, label, type, value }`), e com nome de quem preencheu e do profissional de cada agendamento. Se o formulário foi editado depois da ficha, respostas a campos que não existem mais saem no fim com `label: null` em vez de sumirem.
+- **Formato identificado:** `format: "bem-te-vi.patient-export"`, `version: 1`, `exportedAt`.
+- **Paciente removido também exporta:** o pedido do titular continua valendo depois que o cadastro saiu da lista.
+- **Auditada** (`patient.export`, com quantas fichas/agendamentos/cobranças saíram).
+- **Permissão restrita:** é uma cópia de prontuário inteira num arquivo; a migration deu `patients:export` só a papéis de administrador (mesma regra de `audit:read`).
+- **Fora de escopo, de propósito:** apagar ou anonimizar o paciente a pedido dele. Dado de prontuário tem obrigação de guarda pela clínica, e quando o pedido de eliminação prevalece é uma avaliação jurídica caso a caso — fica para quando houver essa orientação.
+
+## Encerramento de conta da clínica — LGPD
+
+A clínica precisa conseguir **sair levando os dados** e pedir que a plataforma os apague. Três passos:
+
+1. **Exportação completa** — `GET /tenants/:id/export` (exige `tenant:manage` **e** `patients:export`: é a base de pacientes e prontuários inteira). JSON (`format: "bem-te-vi.clinic-export"`, `version: 1`) com clínica e marca (logo em base64), usuários, papéis (com as chaves de permissão), pacientes (inclusive removidos), formulários e fichas de anamnese, agenda, cobranças com pagamentos, trilha de auditoria e aceites de termos. **Nenhum segredo** (hash e versão de senha, tokens de email, token de verificação de domínio). Auditada (`tenant.export`). Montada em memória — serve ao volume de uma clínica no MVP; com bases grandes, vira geração assíncrona com download depois.
+2. **Pedido de encerramento** — `POST /tenants/:id/closure` (`tenant:manage`, `{ password }`): exige a **senha de quem pede** (senha errada → `400`, não `401`). Registra `closureRequestedAt` e devolve `{ closureRequestedAt, deletionAvailableAt, graceDays }`. Avisa por email quem pediu e a plataforma (`PLATFORM_CONTACT_EMAIL`, opcional). **A clínica continua funcionando durante a carência** (`TENANT_DELETION_GRACE_DAYS`, padrão 30 dias): dá tempo de exportar ou desistir. `DELETE /tenants/:id/closure` cancela; `GET /tenants/:id/closure` mostra o estado. Pedido e cancelamento ficam na trilha de auditoria.
+3. **Exclusão definitiva** — `DELETE /platform/tenants/:id` (`platform:manage`, `{ confirmSubdomain }`, `204`). Só para clínica que **pediu** o encerramento (`409` se não pediu) e **depois da carência** (`409` com a data a partir da qual é permitida); o subdomínio digitado precisa bater (`400`). Apaga tudo numa transação (respeitando os FKs `Restrict`; o resto vai em cascata) e grava a prova em `TenantDeletion` (clínica, subdomínio, data do pedido, quem excluiu) — o único registro que sobra. A clínica-plataforma não pode ser excluída (`404`). `GET /platform/tenants` passa a mostrar `closureRequestedAt`.
+
+**A plataforma não apaga dados de clínica por conta própria** (só a pedido dela). A guarda de prontuário depois da saída passa a ser da clínica, com o arquivo exportado — vale um advogado confirmar prazos e redação dos Termos sobre isso.
+
 ## Backoffice da plataforma (`src/platform`)
 
 Gerencia as clínicas **como contas** (listar, suspender/reativar) — não é um jeito de acessar prontuário, agenda ou anamnese de nenhuma clínica; isso continua isolado por `TenantAccessGuard` como sempre foi, sem exceção.
@@ -286,7 +354,7 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 |---|---|
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
 | `unit` | `npm test` (90 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (409 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `e2e` | `npm run test:e2e` (438 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -295,12 +363,12 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 
 Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
 
-- `bem-te-vi.postman_collection.json` — 9 pastas, 82 requisições, em ordem de uso: saúde, autenticação, clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração), agenda (janela, status, conflitos) e isolamento entre clínicas.
+- `bem-te-vi.postman_collection.json` — 9 pastas, 83 requisições, em ordem de uso: saúde, autenticação, clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, formulário e ficha de anamnese), agenda (janela, status, conflitos) e isolamento entre clínicas.
 - `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
 
 **Como usar:** suba a API, importe os dois arquivos, selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
 
-**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 82 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 83 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
 
 **Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
 
@@ -332,4 +400,8 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `appointments-scope.e2e-spec.ts` — escopo da agenda: o dono (Admin, com `appointments:all`) vê e filtra todas; um médico sem ela só lista a própria agenda (403 ao pedir a de um colega, 404 no detalhe/edição/cancelamento de agendamento alheio, 403 ao criar ou mover para outro), só se vê na lista de profissionais, e passa a ver tudo assim que o papel ganha a permissão, sem novo login.
   - `account-emails.e2e-spec.ts` — esqueci minha senha (204 sempre; nada enviado para email inexistente, conta desativada/convidada ou host de outra clínica; link aponta para a clínica do usuário, nunca para o host informado; uso único, expiração, pedido novo invalida o anterior; sessões derrubadas) e convite (criar sem senha, aceite ativa a conta, reenvio invalida o link anterior, convite não reativa conta desativada, permissões). O email é um dublê (`FakeEmailSender`, padrão de todo app de teste).
   - `logo-upload.e2e-spec.ts` — upload de PNG/JPEG/WebP com tipo detectado pelo conteúdo, SVG e não-imagem recusados, 413 acima de 1 MB, rota pública com cache imutável/CORP/nosniff, URL nova a cada troca (a antiga dá 404), remoção (DELETE e PATCH com URL externa), permissões e isolamento.
+  - `audit.e2e-spec.ts` — trilha de auditoria: visualização (quem, IP, navegador), criar/alterar (de → para, só o que mudou)/remover/restaurar, busca (termo, sem a lista de pacientes), registro clínico sem copiar o conteúdo, acesso que falha não registra, filtros, permissão `audit:read`, isolamento entre clínicas e imutabilidade (o banco recusa UPDATE).
+  - `legal.e2e-spec.ts` — aceite de Termos/Política: versões públicas, obrigatório no cadastro e no aceite de convite (versão errada dá 400 e nada é criado; o link do convite não é gasto), registro com IP/navegador, pendências em `/auth/me` para quem foi criado com senha, e versão nova publicada (pendência só do documento que mudou, histórico preservado).
+  - `patient-export.e2e-spec.ts` — exportação do paciente: anexo JSON com cadastro, fichas com rótulos (na ordem do formulário, campo removido do formulário com `label: null`), agenda e cobranças com pagamentos; auditada; paciente removido também exporta; permissão `patients:export` e isolamento.
+  - `tenant-closure.e2e-spec.ts` — saída da clínica: exportação completa sem nenhum segredo (logo em base64, convites pendentes não vazam token) e com as duas permissões exigidas; pedido de encerramento com senha, carência de 30 dias, emails para quem pediu e para a plataforma, cancelamento e auditoria; exclusão pela plataforma só com pedido, depois da carência e confirmando o subdomínio, apagando tudo e deixando a prova em `TenantDeletion`.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

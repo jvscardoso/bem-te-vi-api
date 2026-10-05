@@ -3,19 +3,26 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Put,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { TenantsService } from './tenants.service.js';
 import { TenantLogoService } from './tenant-logo.service.js';
+import { TenantClosureService } from './tenant-closure.service.js';
+import { RequestClosureDto } from './dto/request-closure.dto.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { LOGO_MAX_BYTES } from './logo-image.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
@@ -32,6 +39,7 @@ export class TenantsController {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly logos: TenantLogoService,
+    private readonly closure: TenantClosureService,
   ) {}
 
   // Signup público: cria o tenant + role "Admin" (todas as permissões) + usuário dono,
@@ -89,5 +97,47 @@ export class TenantsController {
   @Post(':id/domain/verify')
   verifyDomain(@Param('id') id: string) {
     return this.tenantsService.verifyDomain(id);
+  }
+
+  // ---- Saída da clínica (LGPD) ----
+
+  // Todos os dados da clínica num arquivo. Exige as duas permissões: é a base de pacientes e
+  // prontuários inteira, então não basta gerenciar a clínica nem exportar um paciente.
+  @RequirePermissions('tenant:manage', 'patients:export')
+  @Header('Cache-Control', 'no-store')
+  @Get(':id/export')
+  async exportAll(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.closure.export(id, actor);
+    const date = data.exportedAt.slice(0, 10);
+    res.setHeader('Content-Disposition', `attachment; filename="clinica-${data.clinic.subdomain}-${date}.json"`);
+    return data;
+  }
+
+  @RequirePermissions('tenant:manage')
+  @Get(':id/closure')
+  async getClosure(@Param('id') id: string) {
+    const tenant = await this.tenantsService.findOne(id);
+    return this.closure.closureView(tenant.closureRequestedAt);
+  }
+
+  @RequirePermissions('tenant:manage')
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/closure')
+  requestClosure(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body() dto: RequestClosureDto,
+  ) {
+    return this.closure.requestClosure(id, actor, dto.password);
+  }
+
+  @RequirePermissions('tenant:manage')
+  @Delete(':id/closure')
+  cancelClosure(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.closure.cancelClosure(id, actor);
   }
 }
