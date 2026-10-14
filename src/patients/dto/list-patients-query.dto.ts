@@ -3,7 +3,8 @@ import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validato
 
 export class ListPatientsQueryDto {
   // Busca livre: cada palavra precisa casar. Palavras com letras casam no nome (qualquer
-  // ordem, sem diferenciar maiúsculas/acentos); palavras só com dígitos/pontuação, no CPF.
+  // ordem, sem diferenciar maiúsculas/acentos); palavras só com dígitos/pontuação, no CPF ou no
+  // telefone (comparando só os dígitos).
   @IsOptional()
   // NUL (\0) não existe em texto do Postgres: chegaria como erro 500 do banco.
   @Transform(({ value }) => (typeof value === 'string' ? value.replace(/\0/g, '').trim() : value))

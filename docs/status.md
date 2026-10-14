@@ -7,8 +7,8 @@
 A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 95 testes unitários e 509 e2e passando.
-- Coleção do Postman: 90 requisições e 143 asserções verdes contra a stack em Docker.
+- 95 testes unitários e 514 e2e passando.
+- Coleção do Postman: 91 requisições e 145 asserções verdes contra a stack em Docker.
 - `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
 
@@ -19,7 +19,7 @@ A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, ana
 | Clínica | Cadastro público com aceite de termos e validação completa (texto obrigatório, subdomínio DNS válido e não reservado, domínio próprio fora do domínio da plataforma); configurações de duração; suspensão pela plataforma |
 | Whitelabel | Marca, upload de logo, domínio próprio com verificação DNS, marca pública por host, login restrito ao endereço |
 | Acesso | Login (tempo constante, sem enumeração, bloqueio por conta depois de 10 senhas erradas), sessões com token de acesso de 15 min + refresh rotativo em cookie `HttpOnly` + logout que vale na hora, JWT com estado relido a cada requisição, RBAC com 15 permissões, sem escalada de privilégio, sempre um admin, convite por email, troca, redefinição e recuperação de senha |
-| Pacientes | CRUD, CPF único (inclusive removidos), soft delete e restauração, busca sem acento por nome ou CPF |
+| Pacientes | CRUD, CPF único (inclusive removidos), soft delete e restauração, busca sem acento por nome, CPF ou telefone |
 | Anamnese | Formulários configuráveis, fichas validadas e imutáveis |
 | Agenda | Duração por profissional ou clínica, sem sobreposição (com lock), transições de status, janela por sobreposição, escopo própria × todas, profissional = quem tem `appointments:attend` |
 | Financeiro | Cobranças, pagamentos parciais (com lock), atraso calculado, resumo |
@@ -40,7 +40,7 @@ Antes de criar uma task, veja o maior número nos dois índices.
 
 | Task | Assunto | Prioridade | Situação |
 |---|---|---|---|
-| 12 | Busca de pacientes também pelo telefone | Média | Pendente |
+| 12 | Busca de pacientes também pelo telefone | Média | ✅ Feita em 14/10/2026 (front: só textos de ajuda, ver índice) |
 | 13 | Permissão `appointments:attend` (quem atende pacientes) | Média; corrige regra que aparece errada nas telas | ✅ Feita em 14/10/2026 (front: task 23) |
 | 14 | Validação do cadastro de clínica antes da landing | Alta (antes de abrir para clientes) | ✅ Feita em 14/10/2026 (front: task 22) |
 | 15 | Links de email com subdomínio em dev (`*.localhost`) | Baixa | Pendente |
@@ -49,7 +49,7 @@ Antes de criar uma task, veja o maior número nos dois índices.
 | 18 | Configurações de tela (`/configs`), começando pelo layout da tela inicial | Média | Pendente |
 | 19 | Revisão de segurança antes de produção (par da task 20 do front) | Alta (antes de produção) | ✅ Feita em 14/10/2026 (front: task 21) |
 
-A situação detalhada fica no índice. As pendentes (12, 15, 17 e 18) seguem a prioridade do produto.
+A situação detalhada fica no índice. As pendentes (15, 17 e 18) seguem a prioridade do produto.
 
 **Revisão de segurança (task 19), registrada em 14/10/2026:**
 - **CORS** fechado (`CorsOriginPolicy`): domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e localhost fora de produção.
@@ -57,7 +57,7 @@ A situação detalhada fica no índice. As pendentes (12, 15, 17 e 18) seguem a 
 - **Sessão:** token de acesso de 15 min, refresh rotativo em cookie `HttpOnly` + `SameSite=Strict`, `POST /auth/refresh` e `POST /auth/logout`. Decisão registrada em `docs/decisoes/07-sessao-e-token.md`.
 - **Login:** bloqueio por conta depois de 10 senhas erradas em 15 min, auditado.
 - **CI:** `audit-ci` (falha em vulnerabilidade alta ou crítica; exceções do CLI do Prisma explicadas em `audit-ci.jsonc`) e gitleaks no histórico.
-- **Logs:** sem query string (a busca leva nome e CPF de paciente), corpo ou headers. Erros `500` não devolvem stack (padrão do Nest).
+- **Logs:** sem query string (a busca leva nome, CPF e telefone de paciente), corpo ou headers. Erros `500` não devolvem stack (padrão do Nest).
 - **Achado à parte:** sem `SMTP_HOST`, o `EmailSender` grava o email inteiro no log, inclusive o link de redefinição de senha com o token. É o modo de dev; em produção, `SMTP_HOST` precisa estar definido.
 
 ### Tasks para o front

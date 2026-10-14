@@ -13,8 +13,10 @@ import {
   type AnamnesisFieldDefinition,
 } from '../anamnesis-templates/anamnesis-answers.validator.js';
 
-// Palavra da busca que só tem dígitos e pontuação de CPF ("123", "123.456", "123.456.789-01").
-const CPF_TOKEN = /^[\d.-]+$/;
+// Palavra da busca que só tem dígitos e pontuação de CPF ou de telefone ("123.456",
+// "123.456.789-01", "(61)", "98888-7777", "+55"): procura no CPF e no telefone, pelos dígitos.
+// Qualquer outra (com letra, ou com "%", "_" etc.) vai para o nome, como texto literal.
+const DIGITS_TOKEN = /^[\d.\-()/+]+$/;
 
 // Toda leitura e escrita de paciente e de registro clínico grava na trilha de auditoria
 // (AuditService): é o que permite à clínica responder "quem acessou os dados deste paciente?".
@@ -198,11 +200,16 @@ export class PatientsService {
     ];
 
     for (const token of (q ?? '').split(/\s+/).filter(Boolean)) {
-      if (CPF_TOKEN.test(token)) {
-        // CPF é guardado só com dígitos, então "123.456" e "123456" são a mesma busca.
+      if (DIGITS_TOKEN.test(token)) {
+        // CPF é guardado só com dígitos, então "123.456" e "123456" são a mesma busca. O telefone
+        // é guardado como foi digitado (texto livre), então a comparação é só entre os dígitos dos
+        // dois lados: "(61) 98888-7777", "61988887777" e "98888" acham o mesmo número.
         const digits = token.replace(/\D/g, '');
         if (digits) {
-          conditions.push(Prisma.sql`cpf LIKE ${`%${digits}%`}`);
+          const pattern = `%${digits}%`;
+          conditions.push(
+            Prisma.sql`(cpf LIKE ${pattern} OR regexp_replace(phone, '[^0-9]', '', 'g') LIKE ${pattern})`,
+          );
         }
       } else {
         // \ é o escape padrão do LIKE no Postgres: "\%" e "\_" viram % e _ literais.

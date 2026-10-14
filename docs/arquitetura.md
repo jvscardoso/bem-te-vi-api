@@ -56,7 +56,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 
 1. **helmet** (cabeçalhos de segurança) e **CORS** (`CorsOriginPolicy`: domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e, fora de produção, localhost; com `credentials`, por causa do cookie de sessão). Os dois vêm de `configureApp` (`src/app-setup.ts`), que o `main.ts` e os testes e2e chamam igual.
 2. **`RequestContextMiddleware`** guarda IP e navegador num `AsyncLocalStorage`, usado pela auditoria e pelos aceites de termos sem precisar passar esses dados por todas as camadas.
-3. **`RequestLoggerMiddleware`** registra método, caminho (sem query string, que pode ter nome ou CPF de paciente), status, duração e IP.
+3. **`RequestLoggerMiddleware`** registra método, caminho (sem query string, que pode ter nome, CPF ou telefone de paciente), status, duração e IP.
 4. **Guards globais, nesta ordem:**
    1. `ThrottlerGuard`: 100 req/min por IP; 5/min nas rotas sensíveis (login, senha, convite); 10/min no cadastro de clínica.
    2. `JwtAuthGuard`: toda rota exige JWT de uma sessão aberta, exceto as marcadas com `@Public()`.

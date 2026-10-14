@@ -1714,7 +1714,7 @@
     },
     {
       "name": "06 · Pacientes",
-      "description": "CRUD, busca (nome, sobrenome e CPF), paginação, anamnese, exclusão e restauração.\n\nO CPF é guardado só com dígitos: `123.456.789-01` e `12345678901` são o mesmo CPF.",
+      "description": "CRUD, busca (nome, sobrenome, CPF e telefone), paginação, anamnese, exclusão e restauração.\n\nO CPF é guardado só com dígitos: `123.456.789-01` e `12345678901` são o mesmo CPF.",
       "item": [
         {
           "name": "Criar paciente (Maria)",
@@ -1936,7 +1936,7 @@
                   "key": "q",
                   "value": "maria",
                   "disabled": true,
-                  "description": "Busca livre: nome, sobrenome e/ou CPF"
+                  "description": "Busca livre: nome, sobrenome, CPF e/ou telefone"
                 },
                 {
                   "key": "page",
@@ -2065,7 +2065,45 @@
                 }
               ]
             },
-            "description": "Palavra só com dígitos, `.` e `-` casa no CPF: `123.456` = `123456`."
+            "description": "Palavra só com dígitos e pontuação (`.`, `-`, `(`, `)`, `/`, `+`) casa no CPF ou no telefone, pelos dígitos: `123.456` = `123456`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"achou a Maria\", () => pm.expect(b.data.length === 1 && b.data[0].fullName === 'Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar por telefone (com máscara)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients?q=(11)%2091234-5678",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "(11) 91234-5678"
+                }
+              ]
+            },
+            "description": "O telefone é guardado como foi digitado; a busca compara só os dígitos: `(11) 91234-5678`, `11912345678` e `91234` acham o mesmo número. \"(11) 91234-5678\" vira duas palavras, e as duas precisam casar."
           },
           "event": [
             {

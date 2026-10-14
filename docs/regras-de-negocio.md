@@ -69,7 +69,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 
 - **CPF:** guardado só com dígitos e **único por clínica, inclusive entre removidos**. O conflito com um removido devolve `removedPatientId`, para o cliente oferecer "restaurar".
 - **Remoção é soft delete:** some das leituras, mas fica no banco com as fichas. Pode ser restaurado. Paciente removido não recebe agendamento nem cobrança novos.
-- **Busca** (`q`): todas as palavras precisam casar. Palavra com letras busca no nome (sem diferenciar maiúsculas nem acentos); palavra só com dígitos busca no CPF (parcial).
+- **Busca** (`q`): todas as palavras precisam casar. Palavra com letras busca no nome (sem diferenciar maiúsculas nem acentos); palavra só com dígitos e pontuação busca no CPF ou no telefone (parcial, comparando só os dígitos: `(61) 98888-7777` acha `61988887777`).
 - `null` no `PATCH` limpa o campo.
 
 ## Anamnese

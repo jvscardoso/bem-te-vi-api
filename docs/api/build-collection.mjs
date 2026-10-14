@@ -427,7 +427,7 @@ const regras = folder(
 
 const pacientes = folder(
   '06 · Pacientes',
-  'CRUD, busca (nome, sobrenome e CPF), paginação, anamnese, exclusão e restauração.\n\nO CPF é guardado só com dígitos: `123.456.789-01` e `12345678901` são o mesmo CPF.',
+  'CRUD, busca (nome, sobrenome, CPF e telefone), paginação, anamnese, exclusão e restauração.\n\nO CPF é guardado só com dígitos: `123.456.789-01` e `12345678901` são o mesmo CPF.',
   [
     req('Criar paciente (Maria)', 'POST', '/tenants/{{tenantId}}/patients', {
       body: {
@@ -461,7 +461,7 @@ const pacientes = folder(
     req('Listar pacientes (padrão)', 'GET', '/tenants/{{tenantId}}/patients', {
       description: 'Resposta paginada: `{ data, meta: { total, page, pageSize, totalPages } }`, em ordem alfabética.',
       query: [
-        ['q', 'maria', { disabled: true, description: 'Busca livre: nome, sobrenome e/ou CPF' }],
+        ['q', 'maria', { disabled: true, description: 'Busca livre: nome, sobrenome, CPF e/ou telefone' }],
         ['page', '1', { disabled: true }],
         ['pageSize', '20', { disabled: true, description: 'padrão 20, máximo 100' }],
       ],
@@ -482,8 +482,13 @@ const pacientes = folder(
       test: [status(200), json, check('achou o João', "b.data.length === 1 && b.data[0].fullName === 'João Pedro Souza'")],
     }),
     req('Buscar por CPF (parcial, com pontuação)', 'GET', '/tenants/{{tenantId}}/patients', {
-      description: 'Palavra só com dígitos, `.` e `-` casa no CPF: `123.456` = `123456`.',
+      description: 'Palavra só com dígitos e pontuação (`.`, `-`, `(`, `)`, `/`, `+`) casa no CPF ou no telefone, pelos dígitos: `123.456` = `123456`.',
       query: [['q', '123.456']],
+      test: [status(200), json, check('achou a Maria', "b.data.length === 1 && b.data[0].fullName === 'Maria da Silva'")],
+    }),
+    req('Buscar por telefone (com máscara)', 'GET', '/tenants/{{tenantId}}/patients', {
+      description: 'O telefone é guardado como foi digitado; a busca compara só os dígitos: `(11) 91234-5678`, `11912345678` e `91234` acham o mesmo número. "(11) 91234-5678" vira duas palavras, e as duas precisam casar.',
+      query: [['q', '(11) 91234-5678']],
       test: [status(200), json, check('achou a Maria', "b.data.length === 1 && b.data[0].fullName === 'Maria da Silva'")],
     }),
     req('Paginar (2 por página)', 'GET', '/tenants/{{tenantId}}/patients', {

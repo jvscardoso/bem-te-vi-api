@@ -27,13 +27,14 @@ describe('Pacientes: busca e paginação (e2e)', () => {
   const names = (body: { data: Listed[] }) => body.data.map((x) => x.fullName);
   const search = async (q: string, t = s) => names((await list(t, { q }).expect(200)).body);
 
-  // Nomes e CPFs escolhidos para exercitar acento, sobrenome, ordem e CPF parcial.
+  // Nomes, CPFs e telefones escolhidos para exercitar acento, sobrenome, ordem, CPF parcial e
+  // telefone com e sem máscara (os dígitos dos telefones não contêm os trechos de CPF buscados).
   const SEARCH_SET = [
     { fullName: 'Maria da Silva', cpf: '12345678901' },
     { fullName: 'João Pedro Souza', cpf: '98765432100' },
     { fullName: 'Joana Silva Santos', cpf: '11122233344' },
-    { fullName: 'José Carlos de Oliveira', cpf: '55566677788' },
-    { fullName: 'Ana Paula Lima' },
+    { fullName: 'José Carlos de Oliveira', cpf: '55566677788', phone: '61 3344-5566' },
+    { fullName: 'Ana Paula Lima', phone: '(61) 98888-7777' },
     { fullName: 'Conceição Aparecida', cpf: '12399988877' },
     { fullName: 'Maria Eduarda Costa', cpf: '32165498700' },
     { fullName: 'Fulano_100% Teste' },
@@ -130,6 +131,37 @@ describe('Pacientes: busca e paginação (e2e)', () => {
 
       const res = await ctx.http().get(removedUrl(s)).query({ q: '777.888' }).set(s.auth).expect(200);
       expect(names(res.body)).toEqual(['Maria Removida']);
+    });
+  });
+
+  describe('busca por telefone', () => {
+    it('trecho do número, número com máscara e só os dígitos acham o mesmo paciente', async () => {
+      expect(await search('98888')).toEqual(['Ana Paula Lima']);
+      expect(await search('(61) 98888-7777')).toEqual(['Ana Paula Lima']);
+      expect(await search('61988887777')).toEqual(['Ana Paula Lima']);
+      expect(await search('98888-7777')).toEqual(['Ana Paula Lima']);
+    });
+
+    it('telefone guardado em outro formato também acha (compara só os dígitos)', async () => {
+      expect(await search('(61) 3344-5566')).toEqual(['José Carlos de Oliveira']);
+      expect(await search('6133445566')).toEqual(['José Carlos de Oliveira']);
+    });
+
+    it('um trecho comum aos dois telefones acha os dois; "(61)" sozinho não cai mais no nome', async () => {
+      expect(await search('(61)')).toEqual(['Ana Paula Lima', 'José Carlos de Oliveira']);
+    });
+
+    it('combina nome e telefone: todas as palavras precisam casar', async () => {
+      expect(await search('ana 98888')).toEqual(['Ana Paula Lima']);
+      expect(await search('jose 98888')).toEqual([]);
+    });
+
+    it('a lista de removidos segue a mesma regra', async () => {
+      const removed = await createPatient(ctx.http, s, { fullName: 'Telefone Removido', phone: '(11) 95555-4444' });
+      await ctx.http().delete(`${listUrl(s)}/${removed.id}`).set(s.auth).expect(200);
+      expect(await search('95555')).toEqual([]);
+      const res = await ctx.http().get(removedUrl(s)).query({ q: '(11) 95555-4444' }).set(s.auth).expect(200);
+      expect(names(res.body)).toEqual(['Telefone Removido']);
     });
   });
 
