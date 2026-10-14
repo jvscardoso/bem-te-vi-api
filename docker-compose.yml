@@ -40,10 +40,16 @@ services:
     environment:
       # Dentro da rede do compose o banco é o host "db", não localhost.
       DATABASE_URL: postgresql://user:password@db:5432/bem_te_vi?schema=public
-      # Vem do .env (ou do ambiente); sem ele a API não sobe.
+      # Vem do .env (ou do ambiente); sem ele a API não sobe. A imagem roda com
+      # NODE_ENV=production: o "change-me" do .env.example é recusado (gere um, ver .env.example).
       JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      # Esta stack responde em http://localhost: sem isso, o cookie de refresh seria Secure e
+      # nenhum cliente o devolveria por http.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       APP_BASE_DOMAIN: ${APP_BASE_DOMAIN:-}
+      RESERVED_SUBDOMAINS: ${RESERVED_SUBDOMAINS:-}
+      CORS_EXTRA_ORIGINS: ${CORS_EXTRA_ORIGINS:-}
       # Emails vão para o Mailpit acima (host "mailpit" na rede do compose).
       SMTP_HOST: mailpit
       SMTP_PORT: '1025'

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import { Test } from '@nestjs/testing';
-import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module.js';
+import { configureApp } from '../../src/app-setup.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { DnsTxtResolver } from '../../src/tenants/dns-txt-resolver.js';
 import { EmailSender, type EmailMessage } from '../../src/mail/email-sender.js';
@@ -53,7 +55,7 @@ export interface TestTenant extends TestUser {
   roleId: string;
 }
 
-// Sobe a aplicação com a mesma configuração de validação do main.ts.
+// Sobe a aplicação como o main.ts (configureApp: helmet e CORS; a validação vem do AppModule).
 // O rate limit é desligado: um storage que nunca acumula hits evita 429 na suíte
 // sem mexer no guard (registrado via APP_GUARD).
 // `dnsTxtResolver`: só quem testa verificação de domínio precisa de um dublê controlável
@@ -78,10 +80,8 @@ export async function createTestApp(
   }
   const moduleRef = await builder.compile();
 
-  const app = moduleRef.createNestApplication();
-  app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
-  );
+  const app = moduleRef.createNestApplication<NestExpressApplication>();
+  configureApp(app);
   await app.init();
 
   return { app, prisma: app.get(PrismaService), http: () => request(app.getHttpServer()) };

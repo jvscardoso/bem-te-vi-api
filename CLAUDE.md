@@ -8,6 +8,7 @@ API de um SaaS whitelabel de gestão de clínicas (NestJS 12 + Prisma 7 + Postgr
 - banco → [`docs/banco-de-dados.md`](docs/banco-de-dados.md)
 - contrato das rotas → `README.md`
 - decisões de produto ainda sem resposta → `docs/decisoes/` (não implemente nada delas sem confirmar)
+- pedidos do front para a API → `docs/changes/` (fora do git; índice em `docs/changes/00-indice.md`)
 
 ## Comandos
 
@@ -65,5 +66,6 @@ npx --yes newman@6.2.2 run docs/api/bem-te-vi.postman_collection.json -e docs/ap
 - [ ] `typecheck`, oxlint, unitários e e2e completos verdes. Um `read ECONNRESET` esporádico no setup em Docker no Windows é instabilidade conhecida.
 - [ ] README (contrato da rota e lista de testes) e `docs/` atualizados, incluindo `docs/status.md`.
 - [ ] Coleção do Postman verde contra a stack em Docker (roda no job `docker-smoke` do CI).
-- [ ] Se mudar o contrato com o frontend (`bem-te-vi-web`, outro repositório): criar a task numerada em `docs/changes/` (fora do git), atualizar `docs/changes/00-indice.md` e o adendo da task `07`, e avisar quando a mudança quebra o front atual.
+- [ ] Se mudar o contrato com o frontend (`bem-te-vi-web`, outro repositório): criar a task numerada **no repositório do front**, em `../bem-te-vi-web/docs/changes/` (fora do git), com o índice `00-indice.md` de lá e o próximo número dos dois índices (a numeração é uma só), e avisar quando a mudança quebra o front atual. Convenção desde 10/10/2026: tasks para a **API** ficam aqui em `docs/changes/` (pedidos do front); tasks para o **front**, lá.
+- [ ] Se a mudança atende uma task de `docs/changes/` (pedido do front): marcar a coluna "Situação na API" do `docs/changes/00-indice.md`.
 - [ ] Variável de ambiente nova: em `.env.example` (comentada) e no serviço `api` do `docker-compose.yml`.

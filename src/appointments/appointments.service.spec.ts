@@ -40,6 +40,7 @@ const RECEPTION: AuthenticatedUser = {
   tenantId: TENANT,
   roleId: 'role-reception',
   permissions: ['appointments:read', 'appointments:write', 'appointments:all'],
+  sessionId: 'session-reception',
 };
 // Profissional sem appointments:all: só a própria agenda (é o 'pro-1' dos agendamentos).
 const OWN_ONLY: AuthenticatedUser = {
@@ -47,6 +48,7 @@ const OWN_ONLY: AuthenticatedUser = {
   tenantId: TENANT,
   roleId: 'role-doctor',
   permissions: ['appointments:read', 'appointments:write'],
+  sessionId: 'session-pro',
 };
 
 const createDto = { patientId: 'patient-1', professionalId: 'pro-1', scheduledAt: START };

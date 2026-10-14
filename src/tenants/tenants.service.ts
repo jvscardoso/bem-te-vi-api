@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
 import { DnsTxtResolver } from './dns-txt-resolver.js';
 import { LegalService } from '../legal/legal.service.js';
+import { TenantAddressPolicy } from './tenant-address-policy.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
 import { UpdateTenantBrandingDto } from './dto/update-tenant-branding.dto.js';
@@ -27,11 +28,16 @@ export class TenantsService {
     private readonly prisma: PrismaService,
     private readonly dnsTxtResolver: DnsTxtResolver,
     private readonly legal: LegalService,
+    private readonly addressPolicy: TenantAddressPolicy,
   ) {}
 
   async create({ owner, legalAcceptance, ...tenantData }: CreateTenantDto) {
     // Antes de qualquer escrita: versão desatualizada é erro do cliente (400), não da transação.
     this.legal.assertCurrent(legalAcceptance);
+    this.addressPolicy.assertSubdomainAvailable(tenantData.subdomain);
+    if (tenantData.customDomain) {
+      this.addressPolicy.assertCustomDomainAvailable(tenantData.customDomain);
+    }
     const email = owner.email.toLowerCase();
     const existingUser = await this.prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -108,6 +114,13 @@ export class TenantsService {
 
   async update(id: string, dto: UpdateTenantDto) {
     const tenant = await this.findOne(id);
+    // Só o que muda: uma clínica antiga com endereço hoje reservado continua editando o resto.
+    if (dto.subdomain !== undefined && dto.subdomain !== tenant.subdomain) {
+      this.addressPolicy.assertSubdomainAvailable(dto.subdomain);
+    }
+    if (dto.customDomain && dto.customDomain !== tenant.customDomain) {
+      this.addressPolicy.assertCustomDomainAvailable(dto.customDomain);
+    }
     this.assertDurationSettings(
       dto.defaultAppointmentDurationMinutes ?? tenant.defaultAppointmentDurationMinutes,
       dto.minAppointmentDurationMinutes ?? tenant.minAppointmentDurationMinutes,

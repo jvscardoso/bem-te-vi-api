@@ -119,16 +119,52 @@ const autenticacao = folder(
         check('o dono nasce ativo e sem senha na resposta', "b.owner.status === 'active' && b.owner.passwordHash === undefined"),
       ],
     }),
+    req('Signup com nome vazio', 'POST', '/tenants', {
+      auth: 'none',
+      description:
+        'Textos obrigatórios não aceitam vazio nem só espaços. Erro de validação: `message` (frases em português) e `errors` (campo, código da regra e frase).',
+      body: {
+        name: '   ',
+        subdomain: 'vazio-{{suffix}}',
+        owner: { name: 'Dono', email: 'vazio-{{suffix}}@exemplo.com', password: '{{password}}' },
+        legalAcceptance: { termsVersion: '1', privacyVersion: '1' },
+      },
+      test: [
+        status(400),
+        json,
+        check('erro estruturado no campo name', "b.errors.length === 1 && b.errors[0].field === 'name' && b.errors[0].code === 'required'"),
+        check('mensagem em português', "b.message[0] === 'Nome da clínica é obrigatório'"),
+      ],
+    }),
+    req('Signup com subdomínio reservado', 'POST', '/tenants', {
+      auth: 'none',
+      description: 'Endereços da plataforma (www, api, app, admin...) não podem virar clínica. Mesmo 409 do subdomínio em uso.',
+      body: {
+        name: 'Clínica reservada',
+        subdomain: 'admin',
+        owner: { name: 'Dono', email: 'reservado-{{suffix}}@exemplo.com', password: '{{password}}' },
+        legalAcceptance: { termsVersion: '1', privacyVersion: '1' },
+      },
+      test: [status(409), json, check('não disponível', "b.message === 'Este subdomínio não está disponível'")],
+    }),
     req('Login (dono)', 'POST', '/auth/login', {
       auth: 'none',
-      description: 'Devolve o JWT. O token só prova identidade: as permissões são relidas do banco a cada requisição.',
+      description:
+        'Devolve o token de acesso (JWT de 15 min) no corpo e abre uma sessão: o refresh token vai só no cookie `btv_refresh` (HttpOnly, SameSite=Strict). O token só prova identidade: as permissões são relidas do banco a cada requisição.',
       body: { email: '{{ownerEmail}}', password: '{{password}}' },
       test: [
         status(200),
         json,
         set('accessToken', 'b.accessToken'),
         check('o dono tem as permissões da clínica, nunca as de plataforma', "b.user.permissions.includes('patients:write') && b.user.permissions.includes('audit:read') && !b.user.permissions.some((k) => k.startsWith('platform:'))"),
+        check('refresh token só no cookie', "b.refreshToken === undefined && pm.cookies.has('btv_refresh')"),
       ],
+    }),
+    req('Renovar o token (refresh)', 'POST', '/auth/refresh', {
+      auth: 'none',
+      description:
+        'Sem corpo: usa o cookie do login (o Postman e o navegador mandam sozinhos). Devolve um token de acesso novo e troca o cookie (rotação). Sem cookie válido: 401, e o front volta para o login.',
+      test: [status(200), json, set('accessToken', 'b.accessToken'), check('token novo', "typeof b.accessToken === 'string'")],
     }),
     req('Login com senha errada', 'POST', '/auth/login', {
       auth: 'none',
@@ -671,6 +707,26 @@ const isolamento = folder(
   ],
 );
 
+// ---------- 09 · Sair ----------
+
+const sair = folder(
+  '09 · Sair (logout)',
+  'Encerra a sessão da clínica A no servidor: o token de acesso dela para de valer na hora, sem esperar os 15 minutos, e o cookie de refresh deixa de renovar. Rode por último.',
+  [
+    req('Logout', 'POST', '/auth/logout', {
+      description: 'Pública (funciona com o token vencido). Encerra a sessão pelo cookie e pelo token, se vier. Sempre 204.',
+      test: [status(204)],
+    }),
+    req('Token da sessão encerrada', 'GET', '/auth/me', {
+      test: [status(401)],
+    }),
+    req('Refresh depois do logout', 'POST', '/auth/refresh', {
+      auth: 'none',
+      test: [status(401)],
+    }),
+  ],
+);
+
 // ---------- montagem ----------
 
 const collection = {
@@ -682,6 +738,7 @@ const collection = {
       '1. Suba a API (`docker compose up -d` + `npm run start:dev`, ou `docker compose --profile app up -d --build`).\n' +
       '2. Ajuste `baseUrl` (variável da coleção ou do ambiente "bem-te-vi · local").\n' +
       '3. Rode as pastas **em ordem** (a 01 cria a clínica e o token; as demais usam o que as anteriores gravaram). Dá para rodar tudo de uma vez no Collection Runner.\n\n' +
+      '**Sessão:** o login devolve o token de acesso (15 min) e põe o refresh token no cookie `btv_refresh`; `POST /auth/refresh` renova e `POST /auth/logout` encerra. O Postman guarda e reenvia o cookie sozinho.\n\n' +
       '**Variáveis** ficam gravadas automaticamente por scripts (`tenantId`, `accessToken`, `patientId`...). Cada execução cria uma clínica nova, então pode repetir sem conflito.\n\n' +
       '**Limites da API em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Se receber 429, espere um minuto.\n\n' +
       '**Insomnia:** importe este mesmo arquivo. Os scripts (que gravam as variáveis e checam as respostas) só rodam se a sua versão tiver suporte a scripts com a API `pm.*`; senão, copie os valores (`tenantId`, `accessToken`...) manualmente para as variáveis.',
@@ -692,7 +749,7 @@ const collection = {
     { key: 'baseUrl', value: 'http://localhost:3000' },
     { key: 'password', value: 'Senha@12345' },
   ],
-  item: [saude, autenticacao, clinica, papeis, usuarios, regras, pacientes, agenda, isolamento],
+  item: [saude, autenticacao, clinica, papeis, usuarios, regras, pacientes, agenda, isolamento, sair],
 };
 
 const environment = {

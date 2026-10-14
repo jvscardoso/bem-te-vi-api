@@ -1,8 +1,8 @@
-import { ArrayUnique, IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayUnique, IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import { RequiredText } from '../../common/validation/required-text.decorator.js';
 
 export class CreateRoleDto {
-  @IsString()
-  @MaxLength(80)
+  @RequiredText(80)
   name!: string;
 
   @IsOptional()

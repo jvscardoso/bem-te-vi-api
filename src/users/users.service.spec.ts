@@ -16,6 +16,7 @@ const actorWith = (permissions: string[], userId = 'actor'): AuthenticatedUser =
   tenantId: TENANT,
   roleId: 'actor-role',
   permissions,
+  sessionId: 'session-1',
 });
 const admin = actorWith(ALL);
 

@@ -8,6 +8,7 @@ const actor = (...permissions: string[]): AuthenticatedUser => ({
   tenantId: 't1',
   roleId: 'r1',
   permissions,
+  sessionId: 'session-1',
 });
 
 function setup() {

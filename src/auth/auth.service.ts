@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash } from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
@@ -13,12 +13,16 @@ import { TokenPasswordDto } from './dto/token-password.dto.js';
 import { AcceptInviteDto } from './dto/accept-invite.dto.js';
 import { LegalService } from '../legal/legal.service.js';
 import type { LegalAcceptanceDto } from '../legal/dto/legal-acceptance.dto.js';
+import { AuditService } from '../audit/audit.service.js';
+import { SessionsService } from './sessions.service.js';
+import { LoginAttemptsService } from './login-attempts.service.js';
 import type { AuthenticatedUser, JwtPayload } from './types/auth.types.js';
 
 const SALT_ROUNDS = 12;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   // Comparado quando o email não existe, para essa resposta custar o mesmo bcrypt que uma
   // senha errada — senão a diferença de tempo revelaria quais emails estão cadastrados.
   private readonly dummyHash = hash(randomUUID(), SALT_ROUNDS);
@@ -30,6 +34,9 @@ export class AuthService {
     private readonly tokens: UserTokensService,
     private readonly mailer: AccountMailerService,
     private readonly legal: LegalService,
+    private readonly sessions: SessionsService,
+    private readonly loginAttempts: LoginAttemptsService,
+    private readonly audit: AuditService,
   ) {}
 
   // Sempre a mesma resposta (204), exista ou não a conta: a busca, o token e o email rodam em
@@ -61,10 +68,11 @@ export class AuthService {
   }
 
   // Troca a senha e derruba todas as sessões (passwordVersion), como a troca autenticada.
-  // Devolve o email para o frontend preencher o login em seguida.
+  // Devolve o email para o frontend preencher o login em seguida. Quem abriu o link provou ser
+  // dono da conta: o bloqueio por tentativas (de outra pessoa, talvez) não vale mais para ele.
   async resetPassword(dto: TokenPasswordDto) {
     const passwordHash = await hash(dto.password, SALT_ROUNDS);
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const userId = await this.tokens.consume(tx, dto.token, 'password_reset');
       const user = await tx.user.findUniqueOrThrow({
         where: { id: userId },
@@ -78,8 +86,11 @@ export class AuthService {
         where: { id: userId },
         data: { passwordHash, passwordVersion: { increment: 1 } },
       });
+      await this.sessions.revokeAllForUser(tx, userId);
       return { email: user.email };
     });
+    await this.loginAttempts.clear(result.email);
+    return result;
   }
 
   // Convidado define a própria senha e a conta passa a `active`. Só vale para quem ainda está
@@ -101,17 +112,20 @@ export class AuthService {
         where: { id: userId },
         data: { passwordHash, status: 'active', passwordVersion: { increment: 1 } },
       });
+      await this.sessions.revokeAllForUser(tx, userId);
       await this.legal.record(tx, user, dto.legalAcceptance);
       return { email: user.email };
     });
   }
 
+  // Devolve também o refresh token, que o controller põe no cookie (nunca no corpo).
   async login(dto: LoginDto) {
+    const email = dto.email.toLowerCase();
     // Em paralelo: resolver o host custa o mesmo para qualquer email, então não muda o tempo
     // de resposta conforme a clínica do usuário.
-    const [user, hostTenantId] = await Promise.all([
+    const [user, hostTenantId, locked] = await Promise.all([
       this.prisma.user.findUnique({
-        where: { email: dto.email.toLowerCase() },
+        where: { email },
         include: {
           tenant: { select: { status: true } },
           role: {
@@ -120,32 +134,40 @@ export class AuthService {
         },
       }),
       dto.host ? this.hostResolver.findActiveTenantId(dto.host) : null,
+      this.loginAttempts.isLocked(email),
     ]);
 
     const passwordMatches = await compare(dto.password, user?.passwordHash ?? (await this.dummyHash));
 
     // Mensagem genérica em todos os casos (email inexistente, senha errada, conta desabilitada,
-    // tenant suspenso, usuário de outra clínica) para não dar pista a quem está tentando
-    // enumerar contas — nem em qual clínica um email está cadastrado.
+    // tenant suspenso, usuário de outra clínica, conta bloqueada por tentativas) para não dar
+    // pista a quem está tentando enumerar contas — nem em qual clínica um email está cadastrado.
     // Clínica do host: o endereço exibe a marca dela (GET /public/branding resolve igual), então
     // só usuários dela entram por ali. Host sem clínica (domínio da plataforma, desconhecido)
     // ou ausente não restringe.
     if (
+      locked ||
       !user ||
       !passwordMatches ||
       user.status !== 'active' ||
       user.tenant.status !== 'active' ||
       (hostTenantId !== null && hostTenantId !== user.tenantId)
     ) {
+      // Conta a falha pelo email digitado, exista a conta ou não (ver LoginAttemptsService).
+      if (!locked && !passwordMatches && (await this.loginAttempts.recordFailure(email)) && user) {
+        this.recordLock(user);
+      }
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    await this.loginAttempts.clear(email);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
     const permissions = user.role.permissions.map((rp) => rp.permission.key);
+    const { sessionId, refreshToken } = await this.sessions.start(user.id, user.passwordVersion);
 
     return {
       accessToken: await this.sign({
@@ -154,7 +176,9 @@ export class AuthService {
         roleId: user.roleId,
         permissions,
         pwv: user.passwordVersion,
+        sid: sessionId,
       }),
+      refreshToken,
       user: {
         id: user.id,
         name: user.name,
@@ -166,13 +190,75 @@ export class AuthService {
     };
   }
 
+  // A clínica fica sabendo que alguém errou a senha de uma conta dela muitas vezes seguidas. Em
+  // segundo plano: gravar só quando a conta existe não pode mudar o tempo da resposta.
+  private recordLock(user: { id: string; tenantId: string }) {
+    this.audit
+      .record({ userId: user.id, tenantId: user.tenantId }, { action: 'auth.login_locked', entityType: 'user', entityId: user.id })
+      .catch((error: unknown) => this.logger.error(`Falha ao auditar bloqueio de login: ${String(error)}`));
+  }
+
+  // Novo token de acesso a partir do refresh token (cookie). Confere de novo o que o login
+  // confere: conta desativada, clínica suspensa ou senha trocada depois do login (por qualquer
+  // caminho, inclusive a redefinição pelo admin) não renovam, e a sessão é encerrada.
+  async refresh(token: string) {
+    const rotated = await this.sessions.rotate(token);
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: rotated.userId },
+      select: {
+        tenantId: true,
+        roleId: true,
+        status: true,
+        passwordVersion: true,
+        tenant: { select: { status: true } },
+        role: { select: { permissions: { select: { permission: { select: { key: true } } } } } },
+      },
+    });
+    if (
+      user.status !== 'active' ||
+      user.tenant.status !== 'active' ||
+      user.passwordVersion !== rotated.passwordVersion
+    ) {
+      await this.sessions.revoke(rotated.sessionId);
+      throw new UnauthorizedException('Sessão expirada; faça login novamente');
+    }
+    return {
+      accessToken: await this.sign({
+        sub: rotated.userId,
+        tenantId: user.tenantId,
+        roleId: user.roleId,
+        permissions: user.role.permissions.map((rp) => rp.permission.key),
+        pwv: user.passwordVersion,
+        sid: rotated.sessionId,
+      }),
+      refreshToken: rotated.refreshToken,
+    };
+  }
+
+  // Encerra a sessão pelo cookie e, se vier, pelo token de acesso (clientes sem cookie, como
+  // scripts). O token de acesso pode estar vencido: só a assinatura importa para achar a sessão.
+  // Nunca falha: sair de uma sessão que já acabou também é sair.
+  async logout(refreshToken: string | undefined, accessToken: string | undefined) {
+    if (refreshToken) {
+      await this.sessions.revokeByRefreshToken(refreshToken);
+    }
+    if (accessToken) {
+      const payload = await this.jwt
+        .verifyAsync<JwtPayload>(accessToken, { ignoreExpiration: true })
+        .catch(() => null);
+      if (payload?.sid) {
+        await this.sessions.revoke(payload.sid);
+      }
+    }
+  }
+
   // Identidade + dados de exibição. As permissões vêm do request (já relidas do banco pelo
   // JwtStrategy); nome, email e papel são lidos aqui para o cliente não depender do que
   // guardou no login, que pode ter ficado velho.
   // `pendingLegalDocuments`: Termos/Política cuja versão vigente o usuário ainda não aceitou
   // (usuário criado com senha pelo admin, ou versão nova publicada). O frontend bloqueia o uso
   // até o aceite em POST /auth/me/legal-acceptances.
-  async me(actor: AuthenticatedUser) {
+  async me({ sessionId: _sessionId, ...actor }: AuthenticatedUser) {
     const [user, pendingLegalDocuments] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: actor.userId },
@@ -189,8 +275,9 @@ export class AuthService {
   }
 
   // Exige a senha atual: um token roubado sozinho não basta para tomar a conta.
-  // A troca derruba todas as sessões (ver JwtStrategy), então devolve um token novo para
-  // quem acabou de trocar não ser deslogado junto.
+  // A troca derruba as outras sessões e os tokens emitidos antes dela (ver JwtStrategy), então
+  // devolve um token novo para quem acabou de trocar não ser deslogado junto. A sessão (e o
+  // cookie de refresh) de quem trocou continua a mesma.
   async changePassword(actor: AuthenticatedUser, dto: ChangePasswordDto) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: actor.userId },
@@ -201,13 +288,15 @@ export class AuthService {
       throw new BadRequestException('Senha atual incorreta');
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: actor.userId },
-      data: {
-        passwordHash: await hash(dto.newPassword, SALT_ROUNDS),
-        passwordVersion: { increment: 1 },
-      },
-      select: { passwordVersion: true },
+    const passwordHash = await hash(dto.newPassword, SALT_ROUNDS);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: actor.userId },
+        data: { passwordHash, passwordVersion: { increment: 1 } },
+        select: { passwordVersion: true },
+      });
+      await this.sessions.keepOnlyAfterPasswordChange(tx, actor.userId, actor.sessionId, user.passwordVersion);
+      return user;
     });
 
     return {
@@ -217,6 +306,7 @@ export class AuthService {
         roleId: actor.roleId,
         permissions: actor.permissions,
         pwv: updated.passwordVersion,
+        sid: actor.sessionId,
       }),
     };
   }

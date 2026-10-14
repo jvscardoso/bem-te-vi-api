@@ -1,34 +1,68 @@
 # Status atual da aplicação
 
-*Atualizado em 05/10/2026.* Retrato do MVP da API: o que está pronto, o que está em andamento e o que falta. Ponto de partida para uma sessão nova de desenvolvimento.
+*Atualizado em 14/10/2026.* Retrato do MVP da API: o que está pronto, o que está em andamento e o que falta. Ponto de partida para uma sessão nova de desenvolvimento.
 
 ## Resumo
 
-A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma) e a **seção de LGPD foi implementada**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
+A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 90 testes unitários e 438 e2e passando.
-- Coleção do Postman: 83 requisições e 128 asserções verdes contra a stack em Docker.
+- 94 testes unitários e 495 e2e passando.
+- Coleção do Postman: 89 requisições e 139 asserções verdes contra a stack em Docker.
+- `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
 
 ## Pronto na API
 
 | Área | O que existe |
 |---|---|
-| Clínica | Cadastro público com aceite de termos; configurações de duração; suspensão pela plataforma |
+| Clínica | Cadastro público com aceite de termos e validação completa (texto obrigatório, subdomínio DNS válido e não reservado, domínio próprio fora do domínio da plataforma); configurações de duração; suspensão pela plataforma |
 | Whitelabel | Marca, upload de logo, domínio próprio com verificação DNS, marca pública por host, login restrito ao endereço |
-| Acesso | Login (tempo constante, sem enumeração), JWT com estado relido a cada requisição, RBAC com 14 permissões, sem escalada de privilégio, sempre um admin, convite por email, troca, redefinição e recuperação de senha |
+| Acesso | Login (tempo constante, sem enumeração, bloqueio por conta depois de 10 senhas erradas), sessões com token de acesso de 15 min + refresh rotativo em cookie `HttpOnly` + logout que vale na hora, JWT com estado relido a cada requisição, RBAC com 14 permissões, sem escalada de privilégio, sempre um admin, convite por email, troca, redefinição e recuperação de senha |
 | Pacientes | CRUD, CPF único (inclusive removidos), soft delete e restauração, busca sem acento por nome ou CPF |
 | Anamnese | Formulários configuráveis, fichas validadas e imutáveis |
 | Agenda | Duração por profissional ou clínica, sem sobreposição (com lock), transições de status, janela por sobreposição, escopo própria × todas |
 | Financeiro | Cobranças, pagamentos parciais (com lock), atraso calculado, resumo |
 | Painel da plataforma | Listar e buscar, suspender e reativar, excluir clínica encerrada |
 | LGPD | Trilha de auditoria imutável; aceite de Termos e Política; exportação do paciente; exportação completa e encerramento de conta |
-| Operação | Docker (API + Postgres + Mailpit), CI com 4 jobs, `TRUST_PROXY`, rate limit, helmet |
+| Validação | Erros em português em toda a API, com `errors: [{ field, code, message }]` |
+| Operação | Docker (API + Postgres + Mailpit), CI com 5 jobs (inclui auditoria de dependências e varredura de segredos), CORS fechado, recusa de segredo fraco em produção, logs sem dado sensível, `TRUST_PROXY`, rate limit, helmet |
 
-## Frontend (`bem-te-vi-web`)
+## Tasks entre API e front
 
-As tasks para o front estão em `docs/changes/` (pasta fora do git, enviada ao repositório do front). A situação de cada uma é desconhecida deste lado. Esta é a lista entregue:
+**Convenção desde 10/10/2026** (as duas pastas ficam fora do git, e a numeração é uma só nos dois repositórios):
+- pedidos do front para a **API** → `docs/changes/` deste repositório, com o índice `docs/changes/00-indice.md` (coluna "Situação na API");
+- tasks para o **front** → `../bem-te-vi-web/docs/changes/`, com o índice de lá.
+
+Antes de criar uma task, veja o maior número nos dois índices.
+
+### Pedidos do front para a API (`docs/changes/`)
+
+| Task | Assunto | Prioridade | Situação |
+|---|---|---|---|
+| 12 | Busca de pacientes também pelo telefone | Média | Pendente |
+| 13 | Permissão `appointments:attend` (quem atende pacientes) | Média; corrige regra que aparece errada nas telas | Pendente |
+| 14 | Validação do cadastro de clínica antes da landing | Alta (antes de abrir para clientes) | ✅ Feita em 14/10/2026 (front: task 22) |
+| 15 | Links de email com subdomínio em dev (`*.localhost`) | Baixa | Pendente |
+| 16 | Nome do paciente nos registros da auditoria | Média | Pendente |
+| 17 | Encerramentos pedidos no painel da plataforma | Média | Pendente |
+| 18 | Configurações de tela (`/configs`), começando pelo layout da tela inicial | Média | Pendente |
+| 19 | Revisão de segurança antes de produção (par da task 20 do front) | Alta (antes de produção) | ✅ Feita em 14/10/2026 (front: task 21) |
+
+A situação detalhada fica no índice. Próxima sugerida: 13.
+
+**Revisão de segurança (task 19), registrada em 14/10/2026:**
+- **CORS** fechado (`CorsOriginPolicy`): domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e localhost fora de produção.
+- **Segredo:** em produção, a API não sobe com `JWT_SECRET` de exemplo ou com menos de 32 caracteres.
+- **Sessão:** token de acesso de 15 min, refresh rotativo em cookie `HttpOnly` + `SameSite=Strict`, `POST /auth/refresh` e `POST /auth/logout`. Decisão registrada em `docs/decisoes/07-sessao-e-token.md`.
+- **Login:** bloqueio por conta depois de 10 senhas erradas em 15 min, auditado.
+- **CI:** `audit-ci` (falha em vulnerabilidade alta ou crítica; exceções do CLI do Prisma explicadas em `audit-ci.jsonc`) e gitleaks no histórico.
+- **Logs:** sem query string (a busca leva nome e CPF de paciente), corpo ou headers. Erros `500` não devolvem stack (padrão do Nest).
+- **Achado à parte:** sem `SMTP_HOST`, o `EmailSender` grava o email inteiro no log, inclusive o link de redefinição de senha com o token. É o modo de dev; em produção, `SMTP_HOST` precisa estar definido.
+
+### Tasks para o front
+
+Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) e a 22 (formato novo dos erros de validação e regras do cadastro). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
 
 | Task | Assunto | Observação |
 |---|---|---|
@@ -43,7 +77,11 @@ As tasks para o front estão em `docs/changes/` (pasta fora do git, enviada ao r
 | 10 | Exportar dados do paciente | |
 | 11 | Encerramento de conta | |
 
-## Decisões de produto pendentes
+## Decisões de produto
+
+**Decidida:** 7. **Sessão e token** (14/10/2026): token de acesso de 15 min em memória, refresh rotativo em cookie `HttpOnly`, logout no servidor. Ver `docs/decisoes/07-sessao-e-token.md`.
+
+**Pendentes:**
 
 Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardando resposta:
 
@@ -60,6 +98,9 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 - Hospedagem, banco gerenciado e domínio do produto (`APP_BASE_DOMAIN`).
 - DNS e certificado coringa para os subdomínios.
 - **HTTPS para domínios próprios das clínicas.** A API verifica a posse, mas não há nada que sirva o front com certificado nesses domínios. Exige emissão sob demanda (Caddy on-demand TLS, Cloudflare for SaaS ou similar).
+- **API servida também no domínio próprio de cada clínica** (proxy, ex.: `agenda.clinica.com.br/api`). Sem isso, o cookie de sessão é de terceiro nesses domínios, o navegador pode bloqueá-lo, e o usuário perde a sessão a cada 15 minutos. Cabe na mesma peça do item acima. Ver `docs/decisoes/07-sessao-e-token.md`.
+- `SMTP_HOST` definido em produção (sem ele, os emails, com os links de senha, vão para o log).
+- `CORS_EXTRA_ORIGINS` com a origem da landing, se ela ficar fora do `APP_BASE_DOMAIN`.
 - Provedor SMTP real, com SPF e DKIM.
 - Backup do banco com teste de restauração.
 - Monitoramento: captura de erros e logs persistidos.
@@ -75,7 +116,8 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 ## Limitações conhecidas
 
 - Mesmo email não pode estar em duas clínicas (email único global).
-- Sem refresh token; a sessão dura `JWT_EXPIRES_IN`.
+- Sessão de no máximo 24 h desde o login, mesmo em uso contínuo (o teto de 1 dia de antes). Sem lista de sessões ativas nem "sair de todos os dispositivos" (o modelo já guarda IP, navegador e último uso).
+- O bloqueio por tentativas pode ser usado para travar a conta de outra pessoa por 15 minutos (sabendo só o email). É o preço de não deixar adivinhar a senha por muitos IPs; a vítima pode redefinir a senha pelo email, o que também tira o bloqueio.
 - Sem busca em usuários, papéis e agenda; a agenda não filtra por vários profissionais de uma vez.
 - "Hoje" (atraso de cobrança) é calculado em UTC.
 - Agenda e financeiro não entram na trilha de auditoria. A trilha não tem política de retenção (fica enquanto a clínica existir).
@@ -95,6 +137,6 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 | `docs/banco-de-dados.md` | Modelo, integridade, SQL fora do Prisma, migrations |
 | `docs/regras-de-negocio.md` | Regras por domínio |
 | `docs/status.md` | Este arquivo |
-| `docs/decisoes/` | Decisões de produto pendentes, com análise |
-| `docs/changes/` | Tasks para o frontend (fora do git) |
+| `docs/decisoes/` | Decisões de produto (pendentes e decididas), com análise |
+| `docs/changes/` | Pedidos do front para a API (fora do git); tasks para o front ficam em `../bem-te-vi-web/docs/changes/` |
 | `docs/api/` | Coleção do Postman e o gerador dela |

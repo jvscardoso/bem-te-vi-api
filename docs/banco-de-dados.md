@@ -21,6 +21,7 @@ Tenant ─┬─ TenantBranding (1:1)        Permission (catálogo global)
         ├─ TenantLogo (1:1)                 │
         ├─ Role ──── RolePermission ────────┘
         │    └── User ─┬─ UserToken (convite / recuperação de senha)
+        │              ├─ Session ── RefreshToken (login)
         │              └─ LegalAcceptance (aceite de termos)
         ├─ Patient ─┬─ AnamnesisRecord ── AnamnesisTemplate (do tenant)
         │           ├─ Appointment ── User (profissional)
@@ -29,6 +30,7 @@ Tenant ─┬─ TenantBranding (1:1)        Permission (catálogo global)
         └─ AuditLog (sem FK para usuário/paciente)
 
 TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
+LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 ```
 
 ## Tabelas
@@ -46,6 +48,9 @@ TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
 | `Permission` (`permissions`) | Catálogo **global** de permissões (14 chaves) | Populado pelo seed e por migrations |
 | `RolePermission` (`role_permissions`) | Permissões de cada papel | Chave composta |
 | `UserToken` (`user_tokens`) | Links de uso único (`password_reset`, `invite`) | Só o hash SHA-256; `expiresAt`, `usedAt` |
+| `Session` (`sessions`) | Sessão de login (o `sid` do JWT) | `expiresAt` = prazo máximo (24 h); `revokedAt` (logout, troca de senha, reuso de refresh); `passwordVersion` em que nasceu; IP, navegador e último uso. Vencidas são apagadas no login seguinte do usuário |
+| `RefreshToken` (`refresh_tokens`) | Refresh tokens da sessão (rotativos) | Só o hash SHA-256; `expiresAt` (12 h sem uso, nunca além da sessão); `usedAt` marca o token já trocado (reuso = roubo) |
+| `LoginAttempt` (`login_attempts`) | Senhas erradas por conta | Chave = hash do email digitado (existente ou não); `failedCount` na janela de 15 min; `lockedUntil`. Contadores parados há mais de 1 dia são apagados nas falhas seguintes |
 | `LegalAcceptance` (`legal_acceptances`) | Aceite de Termos (`terms`) e Política (`privacy`) | Uma linha por aceite, nunca sobrescrita; versão, IP e navegador |
 
 ### Pacientes e prontuário
@@ -78,7 +83,7 @@ TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
   - ficha, agendamento, cobrança e pagamento → usuário: autor e profissional precisam continuar existindo.
 - Por causa desses `Restrict`, **apagar uma clínica exige uma ordem**: fichas → formulários → cobranças (pagamentos em cascata) → agendamentos → pacientes → usuários → clínica. Essa ordem está em `PlatformService.deleteTenant` e no helper dos testes (`cleanupTenants`).
 - As **FKs não garantem que o registro é da mesma clínica**: essa checagem é dos serviços.
-- **O que vai em cascata:** `UserToken` e `LegalAcceptance` com o usuário; `TenantBranding`, `TenantLogo`, `Role` e `AuditLog` com a clínica; `Payment` com a cobrança.
+- **O que vai em cascata:** `UserToken`, `Session` (e os `RefreshToken` dela) e `LegalAcceptance` com o usuário; `TenantBranding`, `TenantLogo`, `Role` e `AuditLog` com a clínica; `Payment` com a cobrança.
 
 ## Extensões e SQL fora do Prisma
 
@@ -86,6 +91,7 @@ TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
 - **Trigger de imutabilidade** da auditoria (migration `audit_log`).
 - **Advisory locks** (`pg_advisory_xact_lock(hashtext(...))`) em transações: agenda (por profissional), pagamento (por cobrança) e administradores (por clínica).
 - **SQL parametrizado** (`$queryRaw`) na busca de pacientes e de clínicas, só para achar os ids da página.
+- **`INSERT ... ON CONFLICT DO UPDATE`** no contador de senhas erradas (`LoginAttemptsService`): o incremento é atômico, então tentativas simultâneas não se perdem.
 
 ## Migrations (em ordem)
 
@@ -105,6 +111,8 @@ TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
 | `legal_acceptances` | `legal_acceptances` |
 | `patients_export_permission` | Permissão `patients:export` (só para papéis de administrador) |
 | `tenant_closure` | `closure_requested_at` na clínica e `tenant_deletions` |
+| `sessions_and_login_attempts` | `sessions`, `refresh_tokens` e `login_attempts` (refresh token e bloqueio por tentativas) |
+| `session_password_version` | `sessions.password_version` (o refresh recusa sessão aberta antes de uma troca de senha) |
 
 **Migrations com dado:** as que criam permissões também as concedem a papéis já existentes, para ninguém perder acesso no deploy. "Papel de administrador" = papel com `users:manage` + `roles:manage` + `tenant:manage`, a mesma definição do `AccessPolicyService`.
 

@@ -9,10 +9,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { RequiredText } from '../../common/validation/required-text.decorator.js';
 
 export class CreateUserDto {
-  @IsString()
-  @MaxLength(150)
+  @RequiredText(150)
   name!: string;
 
   @IsEmail()

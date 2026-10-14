@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "bem-te-vi API",
-    "description": "Roteiro de ponta a ponta da API do bem-te-vi (SaaS whitelabel de clínicas e hospitais).\n\n**Como usar**\n1. Suba a API (`docker compose up -d` + `npm run start:dev`, ou `docker compose --profile app up -d --build`).\n2. Ajuste `baseUrl` (variável da coleção ou do ambiente \"bem-te-vi · local\").\n3. Rode as pastas **em ordem** (a 01 cria a clínica e o token; as demais usam o que as anteriores gravaram). Dá para rodar tudo de uma vez no Collection Runner.\n\n**Variáveis** ficam gravadas automaticamente por scripts (`tenantId`, `accessToken`, `patientId`...). Cada execução cria uma clínica nova, então pode repetir sem conflito.\n\n**Limites da API em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Se receber 429, espere um minuto.\n\n**Insomnia:** importe este mesmo arquivo. Os scripts (que gravam as variáveis e checam as respostas) só rodam se a sua versão tiver suporte a scripts com a API `pm.*`; senão, copie os valores (`tenantId`, `accessToken`...) manualmente para as variáveis.",
+    "description": "Roteiro de ponta a ponta da API do bem-te-vi (SaaS whitelabel de clínicas e hospitais).\n\n**Como usar**\n1. Suba a API (`docker compose up -d` + `npm run start:dev`, ou `docker compose --profile app up -d --build`).\n2. Ajuste `baseUrl` (variável da coleção ou do ambiente \"bem-te-vi · local\").\n3. Rode as pastas **em ordem** (a 01 cria a clínica e o token; as demais usam o que as anteriores gravaram). Dá para rodar tudo de uma vez no Collection Runner.\n\n**Sessão:** o login devolve o token de acesso (15 min) e põe o refresh token no cookie `btv_refresh`; `POST /auth/refresh` renova e `POST /auth/logout` encerra. O Postman guarda e reenvia o cookie sozinho.\n\n**Variáveis** ficam gravadas automaticamente por scripts (`tenantId`, `accessToken`, `patientId`...). Cada execução cria uma clínica nova, então pode repetir sem conflito.\n\n**Limites da API em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Se receber 429, espere um minuto.\n\n**Insomnia:** importe este mesmo arquivo. Os scripts (que gravam as variáveis e checam as respostas) só rodam se a sua versão tiver suporte a scripts com a API `pm.*`; senão, copie os valores (`tenantId`, `accessToken`...) manualmente para as variáveis.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -121,6 +121,91 @@
           ]
         },
         {
+          "name": "Signup com nome vazio",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants"
+              ]
+            },
+            "description": "Textos obrigatórios não aceitam vazio nem só espaços. Erro de validação: `message` (frases em português) e `errors` (campo, código da regra e frase).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"   \",\n  \"subdomain\": \"vazio-{{suffix}}\",\n  \"owner\": {\n    \"name\": \"Dono\",\n    \"email\": \"vazio-{{suffix}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  },\n  \"legalAcceptance\": {\n    \"termsVersion\": \"1\",\n    \"privacyVersion\": \"1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"erro estruturado no campo name\", () => pm.expect(b.errors.length === 1 && b.errors[0].field === 'name' && b.errors[0].code === 'required').to.be.true);",
+                  "pm.test(\"mensagem em português\", () => pm.expect(b.message[0] === 'Nome da clínica é obrigatório').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Signup com subdomínio reservado",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants"
+              ]
+            },
+            "description": "Endereços da plataforma (www, api, app, admin...) não podem virar clínica. Mesmo 409 do subdomínio em uso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Clínica reservada\",\n  \"subdomain\": \"admin\",\n  \"owner\": {\n    \"name\": \"Dono\",\n    \"email\": \"reservado-{{suffix}}@exemplo.com\",\n    \"password\": \"{{password}}\"\n  },\n  \"legalAcceptance\": {\n    \"termsVersion\": \"1\",\n    \"privacyVersion\": \"1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"não disponível\", () => pm.expect(b.message === 'Este subdomínio não está disponível').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Login (dono)",
           "request": {
             "method": "POST",
@@ -135,7 +220,7 @@
                 "login"
               ]
             },
-            "description": "Devolve o JWT. O token só prova identidade: as permissões são relidas do banco a cada requisição.",
+            "description": "Devolve o token de acesso (JWT de 15 min) no corpo e abre uma sessão: o refresh token vai só no cookie `btv_refresh` (HttpOnly, SameSite=Strict). O token só prova identidade: as permissões são relidas do banco a cada requisição.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
@@ -158,7 +243,43 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('accessToken', b.accessToken);",
-                  "pm.test(\"o dono tem as permissões da clínica, nunca as de plataforma\", () => pm.expect(b.user.permissions.includes('patients:write') && b.user.permissions.includes('audit:read') && !b.user.permissions.some((k) => k.startsWith('platform:'))).to.be.true);"
+                  "pm.test(\"o dono tem as permissões da clínica, nunca as de plataforma\", () => pm.expect(b.user.permissions.includes('patients:write') && b.user.permissions.includes('audit:read') && !b.user.permissions.some((k) => k.startsWith('platform:'))).to.be.true);",
+                  "pm.test(\"refresh token só no cookie\", () => pm.expect(b.refreshToken === undefined && pm.cookies.has('btv_refresh')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Renovar o token (refresh)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Sem corpo: usa o cookie do login (o Postman e o navegador mandam sozinhos). Devolve um token de acesso novo e troca o cookie (rotação). Sem cookie válido: 401, e o front volta para o login.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', b.accessToken);",
+                  "pm.test(\"token novo\", () => pm.expect(typeof b.accessToken === 'string').to.be.true);"
                 ]
               }
             }
@@ -3428,6 +3549,100 @@
               "}"
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "09 · Sair (logout)",
+      "description": "Encerra a sessão da clínica A no servidor: o token de acesso dela para de valer na hora, sem esperar os 15 minutos, e o cookie de refresh deixa de renovar. Rode por último.",
+      "item": [
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Pública (funciona com o token vencido). Encerra a sessão pelo cookie e pelo token, se vier. Sempre 204."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token da sessão encerrada",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh depois do logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }

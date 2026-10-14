@@ -32,6 +32,22 @@ jobs:
       - run: npx prisma generate
       - run: npm run lint
       - run: npm run typecheck
+      # Vulnerabilidade alta ou crítica nas dependências de produção derruba o CI. As exceções
+      # conhecidas (e o porquê de cada uma) ficam em audit-ci.jsonc.
+      - run: npx --yes audit-ci@7 --config audit-ci.jsonc
+
+  # Varredura de segredos no histórico inteiro: nenhum .env, chave ou senha real pode entrar no
+  # git. Independe dos outros jobs (não precisa de npm).
+  secrets:
+    name: Varredura de segredos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   unit:
     name: Testes unitários
@@ -70,7 +86,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://user:password@localhost:5432/bem_te_vi?schema=public
       JWT_SECRET: ci-test-secret
-      JWT_EXPIRES_IN: 1d
+      JWT_EXPIRES_IN: 15m
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -103,8 +119,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # .env.example basta: JWT_SECRET de exemplo é o suficiente para este smoke test.
-      - run: cp .env.example .env
+      # A imagem roda com NODE_ENV=production, que recusa o JWT_SECRET de exemplo: gera um
+      # aleatório. (O cookie de refresh sem Secure, para o http://localhost, já é o padrão do
+      # docker-compose.)
+      - name: Preparar o .env
+        run: |
+          cp .env.example .env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=\"$(openssl rand -hex 32)\"|" .env
       - run: docker compose --profile app up -d --build
       - name: Esperar a API ficar saudável
         run: |

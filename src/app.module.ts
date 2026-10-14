@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
@@ -21,6 +21,7 @@ import { PermissionsGuard } from './auth/guards/permissions.guard.js';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware.js';
 import { RequestContextMiddleware } from './common/request-context/request-context.middleware.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
+import { createValidationPipe } from './common/validation/validation-errors.js';
 
 @Module({
   imports: [
@@ -42,6 +43,9 @@ import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.
   providers: [
     AppService,
     { provide: APP_FILTER, useClass: PrismaExceptionFilter },
+    // Aqui, e não no main.ts, para os testes e2e (que montam o app pelo AppModule) validarem
+    // exatamente igual à API de verdade.
+    { provide: APP_PIPE, useFactory: createValidationPipe },
     // Ordem importa: rate limit -> autenticação -> isolamento de tenant -> permissões.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },

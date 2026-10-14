@@ -24,6 +24,9 @@ export const AUDIT_ACTIONS = [
   'tenant.export',
   'tenant.closure_requested',
   'tenant.closure_cancelled',
+  // Conta bloqueada por senhas erradas seguidas (ver LoginAttemptsService). O "ator" é a conta
+  // atacada: quem errou a senha não se identificou.
+  'auth.login_locked',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -42,7 +45,7 @@ export class AuditService {
   // Grava de forma síncrona: se a auditoria falhar, a requisição falha junto. Acesso a dado de
   // saúde sem registro não deve acontecer "em silêncio". Para escritas, passe a transação (`db`)
   // da própria alteração: alteração e registro entram ou falham juntos.
-  async record(actor: AuthenticatedUser, entry: AuditEntry, db: Db = this.prisma) {
+  async record(actor: Pick<AuthenticatedUser, 'userId' | 'tenantId'>, entry: AuditEntry, db: Db = this.prisma) {
     const { ip, userAgent } = RequestContext.current();
     await db.auditLog.create({
       data: { tenantId: actor.tenantId, actorUserId: actor.userId, ...entry, ip, userAgent },

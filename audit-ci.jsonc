@@ -1,0 +1,16 @@
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  // Falha o CI em vulnerabilidade alta ou crítica nas dependências de produção.
+  "high": true,
+  "skip-dev": true,
+  // Exceções conhecidas, todas vindas do CLI do Prisma 7 (a correção do `npm audit` é voltar
+  // para o Prisma 6). Revisar a cada atualização do Prisma e tirar daqui o que deixar de aparecer.
+  "allowlist": [
+    // mysql2 (credenciais em texto puro no downgrade de autenticação): o Prisma traz o driver do
+    // MySQL, mas esta API só fala com Postgres e nunca abre conexão MySQL.
+    "GHSA-3f6p-5ww8-9rcr",
+    // deepmerge-ts (estouro de pilha com objeto recursivo): usado pelo Prisma para ler o
+    // prisma.config.ts do próprio repositório, nunca com dado vindo de requisição.
+    "GHSA-ggr8-5vv4-36mx"
+  ]
+}

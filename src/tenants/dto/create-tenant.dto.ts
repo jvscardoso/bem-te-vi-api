@@ -13,16 +13,18 @@ import {
 } from 'class-validator';
 import { CreateTenantOwnerDto } from './create-tenant-owner.dto.js';
 import { LegalAcceptanceDto } from '../../legal/dto/legal-acceptance.dto.js';
+import { RequiredText } from '../../common/validation/required-text.decorator.js';
 
 export class CreateTenantDto {
-  @IsString()
-  @MaxLength(150)
+  @RequiredText(150)
   name!: string;
 
+  // Rótulo DNS válido: letras minúsculas, números e hífen, sem hífen no começo nem no fim
+  // ("-clinica-" não resolveria como host). Os reservados (www, api...) são checados no serviço.
   @IsString()
   @MaxLength(63)
-  @Matches(/^[a-z0-9-]+$/, {
-    message: 'subdomain deve conter apenas letras minúsculas, números e hífen',
+  @Matches(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
+    message: 'O subdomínio deve ter só letras minúsculas, números e hífen, sem hífen no começo nem no fim',
   })
   subdomain!: string;
 

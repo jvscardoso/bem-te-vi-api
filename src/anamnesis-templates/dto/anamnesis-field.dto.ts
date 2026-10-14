@@ -9,6 +9,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { RequiredText } from '../../common/validation/required-text.decorator.js';
 import { ANAMNESIS_FIELD_TYPES, type AnamnesisFieldType } from '../anamnesis-answers.validator.js';
 
 export class AnamnesisFieldDto {
@@ -17,12 +18,11 @@ export class AnamnesisFieldDto {
   @IsString()
   @MaxLength(60)
   @Matches(/^[a-z][a-z0-9_]*$/, {
-    message: 'key deve começar com letra minúscula e conter só letras minúsculas, números e "_"',
+    message: 'A chave do campo (key) deve começar com letra minúscula e conter só letras minúsculas, números e "_"',
   })
   key!: string;
 
-  @IsString()
-  @MaxLength(150)
+  @RequiredText(150)
   label!: string;
 
   @IsEnum(ANAMNESIS_FIELD_TYPES)

@@ -11,7 +11,7 @@ API do bem-te-vi — SaaS whitelabel de gestão de clínicas: marca e endereço 
 | [docs/banco-de-dados.md](docs/banco-de-dados.md) | Modelo de dados, integridade, SQL fora do Prisma, histórico de migrations |
 | [docs/regras-de-negocio.md](docs/regras-de-negocio.md) | Regras de negócio por domínio |
 | [docs/decisoes/](docs/decisoes/) | Decisões de produto pendentes, com opções e recomendação |
-| `docs/changes/` | Tasks para o frontend (fora do git; enviadas ao repositório do front) |
+| `docs/changes/` | Pedidos do front para a API (fora do git). As tasks para o front ficam em `../bem-te-vi-web/docs/changes/` |
 | [docs/api/](docs/api/) | Coleção do Postman e o gerador dela |
 
 Este README cobre como rodar o projeto e o contrato da API por domínio.
@@ -64,7 +64,7 @@ Este README cobre como rodar o projeto e o contrato da API por domínio.
 
 ### Rodando tudo em containers
 
-Alternativa ao passo a passo acima: sobe Postgres + API na imagem do `Dockerfile`. Só precisa do `.env` (o `JWT_SECRET` é obrigatório):
+Alternativa ao passo a passo acima: sobe Postgres + API na imagem do `Dockerfile`. Só precisa do `.env`. A imagem roda com `NODE_ENV=production`, então o `JWT_SECRET` precisa ser forte: com o `change-me` do `.env.example` (ou com menos de 32 caracteres) a API se recusa a subir e explica o motivo no log. Gere um com `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Como a stack responde em `http://localhost`, o compose desliga a flag `Secure` do cookie de sessão (`AUTH_COOKIE_SECURE=false`).
 
 ```bash
 docker compose --profile app up -d --build
@@ -76,7 +76,8 @@ Na subida, o container aplica as migrations (`prisma migrate deploy`) e o seed d
 
 Notas para deploy:
 - Imagem multi-stage (`node:24-bookworm-slim`), roda como usuário não-root, com `HEALTHCHECK` em `GET /` e shutdown gracioso no SIGTERM.
-- Configuração toda por variável de ambiente (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`, `APP_BASE_DOMAIN`, `TRUST_PROXY`, `SMTP_*`, `MAIL_FROM`, `FRONTEND_URL`, `API_PUBLIC_URL`, `LEGAL_*_VERSION`, `TENANT_DELETION_GRACE_DAYS`, `PLATFORM_CONTACT_EMAIL` — ver `.env.example`); `.env` nunca entra na imagem.
+- Configuração toda por variável de ambiente (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AUTH_COOKIE_SECURE`, `PORT`, `APP_BASE_DOMAIN`, `RESERVED_SUBDOMAINS`, `CORS_EXTRA_ORIGINS`, `TRUST_PROXY`, `SMTP_*`, `MAIL_FROM`, `FRONTEND_URL`, `API_PUBLIC_URL`, `LEGAL_*_VERSION`, `TENANT_DELETION_GRACE_DAYS`, `PLATFORM_CONTACT_EMAIL` — ver `.env.example`); `.env` nunca entra na imagem.
+- Em produção (`NODE_ENV=production`), a API não sobe com `JWT_SECRET` de exemplo ou com menos de 32 caracteres (`src/config/env.validation.ts`).
 - Migrate + seed rodam em cada start do container. Com mais de uma réplica, mova essa etapa para um passo único de release.
 - A imagem mantém o `node_modules` completo (CLI do Prisma e `tsx` para migrate/seed), então fica grande (~1 GB); dá para enxugar depois separando um job de migração.
 
@@ -89,6 +90,29 @@ Fonte da verdade: `prisma/schema.prisma`; explicação completa em [docs/banco-d
 Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
 
 Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
+
+## Erros de validação
+
+Corpo, query e parâmetros passam pelo mesmo `ValidationPipe` (registrado como `APP_PIPE`): campo fora do DTO é `400`, e o erro vem em português, com o campo:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": ["Email do responsável inválido", "Senha do responsável deve ter pelo menos 8 caracteres"],
+  "errors": [
+    { "field": "owner.email", "code": "isEmail", "message": "Email do responsável inválido" },
+    { "field": "owner.password", "code": "minLength", "message": "Senha do responsável deve ter pelo menos 8 caracteres" }
+  ]
+}
+```
+
+- `message`: a lista de frases, como antes (agora em português). Uma por campo errado: com várias regras quebradas no mesmo campo, vale a mais básica.
+- `errors`: o mesmo conteúdo estruturado, para o cliente marcar o campo na tela ou traduzir por conta própria. `field` é o caminho no corpo ou na query (`owner.email`, `fields.0.label`). `code` é a regra: o nome dela no class-validator (`isEmail`, `minLength`, `maxLength`, `isUUID`, `isEnum`, `matches`...), `required` (ausente, vazio ou só espaços) ou `unknownField` (campo que a rota não aceita).
+- Os nomes dos campos em português ficam em `src/common/validation/field-labels.ts`. Campo sem entrada lá aparece como `Campo "x"`.
+- **Texto obrigatório** (`@RequiredText(max)`): nomes de clínica, responsável, usuário, paciente, papel, formulário e campo de formulário, descrição de cobrança e nome fantasia não aceitam `""` nem só espaços, e são gravados sem os espaços das pontas. Nos `PATCH`, o campo continua opcional, mas, se vier, não pode vir vazio. Nome fantasia se limpa com `null`.
+
+Erros que não são de formato (regra de negócio, conflito) continuam com `message` como texto e sem `errors`.
 
 ## Onboarding de um tenant novo
 
@@ -104,6 +128,13 @@ Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 ```
 
 `legalAcceptance` é o aceite dos Termos de Uso e da Política de Privacidade vigentes (ver "Termos de Uso e Política de Privacidade"). Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
+
+A rota é usada pela landing page (outro projeto), então a API valida tudo sozinha:
+- `name` e `owner.name`: obrigatórios, sem aceitar vazio nem só espaços (até 150).
+- `subdomain`: rótulo DNS válido, `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$` (sem hífen no começo nem no fim). Subdomínios da plataforma (`www`, `api`, `app`, `admin`, `backoffice`, `plataforma`, `mail`, `smtp`, `status`, `docs`, `blog`, `ajuda`, `suporte`, `static`, `cdn`, `assets` e os de `RESERVED_SUBDOMAINS`) dão `409` "Este subdomínio não está disponível", a mesma forma do subdomínio já em uso. Vale também em `PATCH /tenants/:id`, quando o subdomínio muda.
+- `customDomain`: o domínio base da plataforma (`APP_BASE_DOMAIN`) ou um subdomínio dele dá `409` "Este domínio não está disponível" (contornaria a lista de reservados).
+- `owner.password`: de 8 a 200 caracteres, como nas outras rotas de senha (o bcrypt só considera os primeiros 72 bytes).
+- Erros de formato no padrão de "Erros de validação" acima.
 
 ## Pacientes
 
@@ -210,23 +241,36 @@ Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" 
 
 ## Autenticação e autorização (`src/auth`)
 
-- Login: `POST /auth/login` com `{ email, password, host? }` → retorna um JWT (`accessToken`) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`).
+- Login: `POST /auth/login` com `{ email, password, host? }` → retorna o token de acesso (`accessToken`, JWT de 15 min) e os dados do usuário (`tenantId`, `roleId`, `permissions` — chaves do catálogo de `Permission`), e abre uma **sessão**: o refresh token vai só no cookie `btv_refresh`, nunca no corpo (ver "Sessão" abaixo).
 - **Login restrito à clínica do endereço.** `host` é o `window.location.host` do frontend, o mesmo enviado a `GET /public/branding`, e é resolvido pela mesma regra (`TenantHostResolver`, compartilhado pelos dois endpoints). Se ele aponta para uma clínica, só usuários dela entram por ali: senão `401` com a mesma mensagem genérica "Credenciais inválidas" (não revela que o email existe em outra clínica). Sem isso, a página com a marca da clínica B aceitava o login de um usuário da A e mostrava os dados da A com a marca da B — confuso e um prato cheio para phishing. Host que não resolve (domínio principal da plataforma, desconhecido, domínio próprio não verificado, clínica suspensa) ou ausente não restringe: nessas telas o front mostra a marca padrão, e o campo é opcional por compatibilidade (scripts, Postman). A checagem vem depois de validar a senha e o host é resolvido em paralelo com a busca do usuário, para o tempo de resposta não depender da clínica do email.
 - **Tempo de resposta do login não revela emails cadastrados:** email inexistente também roda um `bcrypt.compare` (contra um hash descartável), em vez de responder antes e mais rápido que uma senha errada.
 - Toda rota é protegida por padrão (`JwtAuthGuard` global). Para deixar uma rota pública, use `@Public()`.
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
 - `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
-- `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions }` no handler.
-- `GET /auth/me` devolve isso mais `name`, `email` e `role: { id, name }` (para o cabeçalho do app, sem depender do que o cliente guardou no login).
+- `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions, sessionId }` no handler.
+- `GET /auth/me` devolve isso (sem o `sessionId`) mais `name`, `email` e `role: { id, name }` (para o cabeçalho do app, sem depender do que o cliente guardou no login).
 - Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` e `PATCH /auth/me/password` contra força bruta.
+- **Bloqueio por conta:** 10 senhas erradas em 15 minutos bloqueiam a conta por 15 minutos (`LoginAttemptsService`), contra o ataque espalhado por muitos IPs, que o limite por IP não pega. Durante o bloqueio, nem a senha certa entra, e a resposta é a mesma `401` "Credenciais inválidas". O contador é pelo hash do email digitado, exista a conta ou não, então ele não revela quais emails existem. O bloqueio de uma conta existente entra na trilha de auditoria da clínica (`auth.login_locked`). Quem foi bloqueado por terceiros pode redefinir a senha pelo email, o que também tira o bloqueio.
 - `helmet` aplica cabeçalhos de segurança padrão (CSP, HSTS, etc.) em todas as respostas.
-- `RequestLoggerMiddleware` loga método/rota/status/duração/IP de cada request (auditoria básica).
+- **CORS** (`CorsOriginPolicy`): só estas origens recebem `Access-Control-Allow-Origin` (com `credentials`, por causa do cookie): o `APP_BASE_DOMAIN` e os subdomínios dele, os domínios próprios **verificados** das clínicas (consulta com cache de 1 minuto), as origens exatas de `CORS_EXTRA_ORIGINS` (ex.: a landing em outro domínio) e, fora de produção, `http://localhost` e `http://*.localhost` em qualquer porta. Em produção, só `https`. Clientes sem `Origin` (curl, Postman, servidores) não são afetados.
+- `RequestLoggerMiddleware` loga método/caminho/status/duração/IP de cada request (auditoria básica). Só o caminho, sem query string: a busca de pacientes leva nome e CPF em `?q=`. Corpo e headers (senha, tokens, `Authorization`, cookie) nunca vão para o log.
+
+**Sessão.** O login abre uma sessão (`Session`). O token de acesso é curto (`JWT_EXPIRES_IN`, padrão `15m`) e leva o id dela (`sid`); o front o guarda **em memória** e o renova com o refresh token, que fica num cookie que o JavaScript da página não lê:
+- Cookie `btv_refresh`: `HttpOnly`, `SameSite=Strict`, sem `Path` (o navegador o restringe ao "diretório" da rota que o criou: `/auth`, ou `/api/auth` atrás de um proxy em `/api`), `Secure` em produção (`AUTH_COOKIE_SECURE` muda isso), sem `Max-Age` (some quando o navegador fecha, como o `sessionStorage`).
+- `POST /auth/refresh` (pública, sem corpo) → `{ accessToken }` e um cookie novo: o refresh é **rotativo** (cada uso gera outro e marca o anterior como usado). Sem cookie, cookie desconhecido, vencido ou de sessão encerrada → `401` e o cookie é apagado. Conta desativada ou clínica suspensa também não renova.
+- **Reuso = roubo:** um refresh já trocado, reapresentado depois de 10 segundos, encerra a sessão inteira (o dono também cai, mas quem copiou o cookie perde o acesso). Dentro dos 10 segundos, é a corrida de duas abas renovando juntas: devolve um token de acesso sem gerar outro cookie.
+- **Prazos:** o refresh vence com 12 h sem uso, e a sessão dura no máximo 24 h desde o login (o mesmo teto do token de 1 dia de antes). Depois, login de novo.
+- `POST /auth/logout` (pública, `204` sempre) encerra a sessão pelo cookie e, se vier, pelo `Authorization` (mesmo vencido: só a assinatura importa), e apaga o cookie. O token de acesso da sessão leva `401` na requisição seguinte: o `JwtStrategy` confere a sessão a cada requisição.
+- Token sem `sid` (emitido antes das sessões existirem) é recusado.
+- No banco ficam só os hashes SHA-256 dos refresh tokens. Sessões vencidas do usuário são apagadas no login seguinte dele.
+- CSRF: o `SameSite=Strict` impede outro site de disparar `/auth/refresh` ou `/auth/logout` com o cookie, e o CORS impede que ele leia a resposta.
+- **Domínio próprio:** `SameSite=Strict` funciona quando o front e a API são o mesmo site (`<sub>.<domínio base>` e `api.<domínio base>`). Num domínio próprio de clínica, o cookie da API seria de terceiro e o navegador pode bloqueá-lo: nesse caso, a API precisa ser servida no próprio domínio da clínica (proxy, ex.: `clinica.com.br/api`). Ver `docs/decisoes/07-sessao-e-token.md`.
 
 **Estado sempre fresco.** O token só prova identidade: a cada request o `JwtStrategy` relê do banco o usuário, o status do tenant e as permissões do papel (uma query por PK). Por isso desativar um usuário, suspender um tenant ou mudar as permissões de um papel tem efeito imediato (401/403), sem esperar o token expirar nem exigir novo login. Login também é recusado (401, mesma mensagem genérica) para usuário desativado ou tenant suspenso.
 
-**Senha.** `PATCH /auth/me/password` (`{ currentPassword, newPassword }`) troca a própria senha e exige a atual — um token roubado sozinho não toma a conta; senha atual errada dá `400` (não `401`, que o cliente interpretaria como sessão inválida). `PATCH /tenants/:tenantId/users/:id/password` (`users:manage`, `{ password }`, `204`) é a redefinição pelo admin: não vale para si mesmo (esse caminho não pede a senha atual) nem para usuário "acima" do ator. As duas **derrubam todas as sessões** do usuário: `User.passwordVersion` é incrementada e vai no token (`pwv`); token com versão diferente leva `401`. A troca pelo próprio usuário devolve um `accessToken` novo, para ele não ser deslogado junto. Um contador, e não uma data, porque o `iat` do JWT tem resolução de segundos e deixaria uma janela na comparação; tokens emitidos antes do campo existir não têm `pwv` e valem como versão 0.
+**Senha.** `PATCH /auth/me/password` (`{ currentPassword, newPassword }`) troca a própria senha e exige a atual — um token roubado sozinho não toma a conta; senha atual errada dá `400` (não `401`, que o cliente interpretaria como sessão inválida). `PATCH /tenants/:tenantId/users/:id/password` (`users:manage`, `{ password }`, `204`) é a redefinição pelo admin: não vale para si mesmo (esse caminho não pede a senha atual) nem para usuário "acima" do ator. As duas **derrubam as sessões** do usuário: as sessões são encerradas no banco e `User.passwordVersion` é incrementada e vai no token (`pwv`); token com versão diferente leva `401`. A troca pelo próprio usuário mantém a sessão (e o cookie) de quem trocou e devolve um `accessToken` novo, para ele não ser deslogado junto. Um contador, e não uma data, porque o `iat` do JWT tem resolução de segundos e deixaria uma janela na comparação; tokens emitidos antes do campo existir não têm `pwv` e valem como versão 0.
 
-**Esqueci minha senha.** `POST /auth/forgot-password` (`{ email, host? }`, pública) responde **sempre `204`**, exista ou não a conta: a busca, o token e o email rodam em segundo plano, então nem a resposta nem o tempo dela revelam se o email está cadastrado. Só recebe o link quem conseguiria logar (ativo, clínica ativa e — se `host` aponta para uma clínica — dessa clínica, mesma regra do login). `POST /auth/reset-password` (`{ token, password }`) troca a senha, derruba todas as sessões (`passwordVersion`) e devolve `{ email }` para o front preencher o login. O link vale **1 hora**.
+**Esqueci minha senha.** `POST /auth/forgot-password` (`{ email, host? }`, pública) responde **sempre `204`**, exista ou não a conta: a busca, o token e o email rodam em segundo plano, então nem a resposta nem o tempo dela revelam se o email está cadastrado. Só recebe o link quem conseguiria logar (ativo, clínica ativa e — se `host` aponta para uma clínica — dessa clínica, mesma regra do login). `POST /auth/reset-password` (`{ token, password }`) troca a senha, derruba todas as sessões e devolve `{ email }` para o front preencher o login. O link vale **1 hora**.
 
 **Convite.** `POST /tenants/:tenantId/users` **sem `password`** cria o usuário como `invited` (não loga) e envia um link para ele definir a própria senha; com `password`, continua o fluxo antigo (ativo na hora, sem email). `POST /auth/accept-invite` (`{ token, password }`) define a senha, ativa a conta e devolve `{ email }`. `POST /tenants/:tenantId/users/:id/invite` (`users:manage`, `204`) reenvia (só para quem ainda está `invited`, senão `409`; mesmas regras de "acima do ator"). O convite vale **7 dias** e não reativa uma conta desativada antes do aceite.
 
@@ -268,6 +312,7 @@ Dado de saúde é dado pessoal sensível. A clínica precisa conseguir responder
 | `patient.create` / `patient.delete` / `patient.restore` | escrita | — |
 | `patient.update` | `PATCH /patients/:id` | `changes`: só os campos que mudaram, de → para (é o histórico do cadastro, que o registro em si não tem) |
 | `clinical_record.create` / `clinical_record.list` | ficha de anamnese | id da ficha / quantidade — **nunca o conteúdo clínico**, que ficaria duplicado num lugar com outro controle de acesso |
+| `auth.login_locked` | conta bloqueada por 10 senhas erradas em 15 min | — (o "ator" é a própria conta atacada; `entityId` = id dela). Gravado em segundo plano, para não mudar o tempo da resposta do login |
 
 Cada registro guarda quem (`actorUserId`), paciente, quando, IP e navegador (via `RequestContext`, um `AsyncLocalStorage` preenchido por middleware). Agenda e financeiro ficam de fora por ora (volume alto, dado menos sensível).
 
@@ -348,14 +393,15 @@ Cobrança e pagamento nativos — nada disto depende de serviço externo. **Emis
 
 ## CI (`.github/workflows/ci.yml`)
 
-Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últimos só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
+Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e `docker-smoke` só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
 
 | Job | O que valida |
 |---|---|
-| `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) |
-| `unit` | `npm test` (90 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (438 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
-| `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real) e a imagem Docker em si |
+| `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) + auditoria das dependências de produção (`audit-ci`: falha em vulnerabilidade alta ou crítica; as exceções conhecidas, todas do CLI do Prisma, ficam explicadas em `audit-ci.jsonc`) |
+| `secrets` | Varredura de segredos no histórico inteiro do git (gitleaks): nenhum `.env`, chave ou senha real pode entrar no repositório |
+| `unit` | `npm test` (94 testes, sem banco) |
+| `e2e` | `npm run test:e2e` (495 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real, recusa de segredo fraco em produção) e a imagem Docker em si. Gera um `JWT_SECRET` aleatório, já que a imagem recusa o de exemplo |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
 
@@ -363,12 +409,12 @@ Roda em todo push em `main` e em cada pull request. Quatro jobs; os três últim
 
 Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
 
-- `bem-te-vi.postman_collection.json` — 9 pastas, 83 requisições, em ordem de uso: saúde, autenticação, clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, formulário e ficha de anamnese), agenda (janela, status, conflitos) e isolamento entre clínicas.
+- `bem-te-vi.postman_collection.json` — 10 pastas, 89 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
 - `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
 
-**Como usar:** suba a API, importe os dois arquivos, selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
+**Como usar:** suba a API, importe os dois arquivos (o Postman guarda o cookie de sessão sozinho e o reenvia no refresh e no logout), selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
 
-**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 83 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 89 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
 
 **Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
 
@@ -382,6 +428,9 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `retry: 2` no config de e2e (`vitest.config.e2e.ts`): esses testes fazem muitas requisições reais contra o Postgres do Docker, e volume alto ocasionalmente esbarra em instabilidade de rede do ambiente (`ECONNRESET`, mais comum no Docker Desktop do Windows), não em bug de lógica — uma asserção errada continua falhando na repetição. A causa raiz mais comum (pool do Prisma sem TCP keepalive) já foi corrigida em `PrismaService`; o retry cobre o que sobra dessa classe de flake, mas só ajuda dentro de um `it()` — uma falha no `beforeAll` (setup do arquivo) derruba o arquivo inteiro sem repetir. Por isso o CI também reexecuta o comando `test:e2e` uma vez se ele falhar (ver abaixo).
   - `hookTimeout: 60_000`: os `beforeAll` criam clínicas e usuários de verdade (cada um com hash e login em bcrypt de custo 12); com todos os arquivos em paralelo disputando CPU, setups pesados como o de `appointments-pagination` passavam do padrão de 10s e derrubavam o arquivo inteiro. Testes que contam linhas (ex.: "SQL na busca não altera nada") contam só as da própria clínica: uma contagem global muda sozinha com os outros arquivos criando dados em paralelo.
   - `auth.e2e-spec.ts` — signup, login, isolamento entre tenants, RBAC, suspensão/desativação.
+  - `sessions.e2e-spec.ts` — sessão: cookie de refresh (`HttpOnly`, `SameSite=Strict`, sem `Path`, `Secure` conforme `AUTH_COOKIE_SECURE`, fora do corpo), rotação, corrida entre abas, reuso depois da janela encerrando a sessão, prazos (máximo e inatividade), conta desativada, token sem sessão; logout pelo cookie e pelo token (mesmo vencido) com efeito imediato no token de acesso; troca de senha mantendo só a sessão de quem trocou; redefinição pelo admin derrubando o refresh; bloqueio por 10 senhas erradas (mesma mensagem, auditoria, email inexistente igual, fim do bloqueio, redefinição pelo email tirando o bloqueio).
+  - `cors.e2e-spec.ts` — origens liberadas (domínio base e subdomínios, domínio próprio só verificado, `CORS_EXTRA_ORIGINS` exatas, localhost fora de produção), origem desconhecida sem `Access-Control-Allow-Origin`, produção só `https`, preflight e requisição sem `Origin`.
+  - `validation.e2e-spec.ts` — cadastro de clínica (nomes vazios ou só espaços, gravados sem espaços nas pontas, subdomínios reservados no cadastro e no PATCH, formato DNS do subdomínio, domínio próprio dentro do domínio da plataforma, senha acima de 200), texto obrigatório nas outras rotas e o formato dos erros (`message` em português, `errors` com campo e código, `required`, `unknownField`, mensagem própria do DTO, query, enum e item de lista).
   - `users-roles-pagination.e2e-spec.ts` — paginação de usuários e papéis: páginas sem repetir/pular, ordenação por nome com desempate por id (usuários; papéis não têm nome duplicado por causa da unique), total conforme o tenant, limites e validação.
   - `platform.e2e-spec.ts` — backoffice: acesso (401/403), listagem (contagens, exclusão da própria clínica-plataforma), busca por nome/subdomínio/domínio próprio (acentos, curingas, SQL como texto), suspender/reativar, e o teste crítico de que o signup público nunca ganha `platform:manage` (comprovado removendo a exclusão de propósito: derruba 2 testes).
   - `billing.e2e-spec.ts` — cobrança e pagamento: CRUD, `overdue` calculado (mutuamente exclusivo com `pending`), edição/cancelamento bloqueados após qualquer pagamento, pagamento parcial/total/excedente, resumo financeiro, isolamento e permissões, e **concorrência** (pagamentos simultâneos provam o advisory lock por cobrança; sem ele, os testes de corrida somam mais que o valor devido — comprovado removendo o lock: uma cobrança de R$100 chega a receber R$160 em pagamentos simultâneos).

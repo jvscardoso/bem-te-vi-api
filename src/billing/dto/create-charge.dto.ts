@@ -1,4 +1,5 @@
-import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { RequiredText } from '../../common/validation/required-text.decorator.js';
 
 export class CreateChargeDto {
   @IsUUID('4')
@@ -9,8 +10,7 @@ export class CreateChargeDto {
   @IsUUID('4')
   appointmentId?: string;
 
-  @IsString()
-  @MaxLength(200)
+  @RequiredText(200)
   description!: string;
 
   // Em centavos (R$ 150,00 = 15000). O teto é só defesa contra erro de digitação/overflow,

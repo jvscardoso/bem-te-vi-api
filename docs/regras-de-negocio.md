@@ -1,15 +1,22 @@
 # Regras de negócio
 
-Referência das regras que a API impõe, por domínio. Os detalhes de contrato (campos, exemplos, erros) estão no [README](../README.md); as tasks para o frontend ficam em `docs/changes/` (fora do git). Quando este documento e o código divergirem, vale o código.
+Referência das regras que a API impõe, por domínio. Os detalhes de contrato (campos, exemplos, erros) estão no [README](../README.md); os pedidos do front para a API ficam em `docs/changes/`, e as tasks para o front, em `../bem-te-vi-web/docs/changes/` (as duas pastas fora do git). Quando este documento e o código divergirem, vale o código.
 
 ## O produto
 
 SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própria marca e o próprio endereço, além de usuários e papéis, pacientes com anamnese, agenda e financeiro. A equipe do bem-te-vi tem um **painel da plataforma** para gerenciar as clínicas como contas, **sem acesso a dado clínico**.
 
+## Formulários (validação)
+
+- **Texto obrigatório não aceita vazio nem só espaços:** nomes de clínica, responsável, usuário, paciente, papel, formulário e campo de formulário, descrição de cobrança e nome fantasia. Os espaços das pontas são removidos ao gravar. Para limpar o nome fantasia, `null`.
+- **Erros de validação em português**, com o campo: `message` (frases prontas para exibir) e `errors: [{ field, code, message }]` (para marcar o campo na tela). Uma mensagem por campo.
+
 ## Clínica (tenant)
 
 - **Cadastro público** (`POST /tenants`): cria clínica, papel "Admin" e usuário dono numa transação. O Admin recebe todo o catálogo de permissões, **exceto as `platform:*`**. O dono precisa aceitar os Termos e a Política vigentes.
-- `subdomain` é único (`a-z`, `0-9` e `-`). O **email é único em toda a plataforma**: a mesma pessoa não pode ter conta em duas clínicas com o mesmo email.
+- `subdomain` é único e precisa ser um rótulo DNS válido: `a-z`, `0-9` e `-`, sem hífen no começo nem no fim. **Subdomínios da plataforma são reservados** (`www`, `api`, `app`, `admin`, `backoffice`, `mail`... e os de `RESERVED_SUBDOMAINS`): `409` "Este subdomínio não está disponível", no cadastro e na troca. O **email é único em toda a plataforma**: a mesma pessoa não pode ter conta em duas clínicas com o mesmo email.
+- Nome da clínica e do responsável são obrigatórios, sem aceitar vazio nem só espaços. A senha do responsável tem de 8 a 200 caracteres. O cadastro vai para a landing page (outro projeto), então a API valida tudo sozinha.
+- **Domínio próprio** não pode ser o domínio da plataforma nem um subdomínio dele (`409` "Este domínio não está disponível").
 - **Duração de atendimento:** padrão (30 min) e mínima (5 min) por clínica. A padrão não pode ser menor que a mínima, e a mínima não pode ficar acima da duração própria de algum profissional.
 - **Suspensão** é ação da plataforma, nunca da própria clínica. Clínica suspensa: ninguém loga, sessões abertas caem e a marca pública responde `404`.
 
@@ -19,6 +26,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 - **Resolução por host** (`GET /public/branding?host=`): domínio próprio **verificado** ou `<sub>.<APP_BASE_DOMAIN>`. Em dev, um host sem ponto é o próprio subdomínio. Clínica suspensa, inexistente ou com domínio não verificado → `404`.
 - **Domínio próprio** só controla a marca depois de **verificado por DNS** (registro TXT `_bemtevi-challenge.<domínio>`). Trocar o domínio gera um desafio novo e zera a verificação.
 - **Login restrito ao endereço:** se o `host` do login aponta para uma clínica, só usuários dela entram. Com outra clínica, a resposta é `401` genérico.
+- **CORS:** só o domínio da plataforma e seus subdomínios, os domínios próprios **verificados** e as origens de `CORS_EXTRA_ORIGINS` podem chamar a API pelo navegador.
 
 ## Acesso: usuários, papéis e permissões
 
@@ -48,7 +56,13 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
   - troca exige a atual;
   - o admin pode redefinir a de outro usuário, mas não a própria nem a de quem está "acima";
   - "esqueci minha senha" sempre responde `204`, e o link vale 1 hora;
-  - toda troca derruba as sessões abertas.
+  - toda troca derruba as sessões abertas (a troca pela própria pessoa mantém só a sessão dela).
+- **Sessão** (decisão 07):
+  - o token de acesso vale 15 minutos e o front o renova com o refresh token (cookie `HttpOnly`);
+  - a sessão vence com 12 h sem renovação e dura no máximo 24 h desde o login;
+  - "Sair" encerra a sessão no servidor, e o token dela para de valer na hora;
+  - um refresh token roubado e reusado encerra a sessão inteira.
+- **Bloqueio por tentativas:** 10 senhas erradas em 15 minutos bloqueiam a conta por 15 minutos. A mensagem é a mesma de senha errada, e email inexistente passa pela mesma regra (não revela quais contas existem). O bloqueio de uma conta da clínica entra na trilha de auditoria. Quem foi bloqueado por outra pessoa pode redefinir a senha pelo email, o que também tira o bloqueio.
 
 ## Pacientes
 

@@ -1,8 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
+import { configureApp } from '../src/app-setup.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
 // Roda contra o Postgres do .env (precisa de `docker compose up -d` + migrate + seed).
@@ -19,7 +20,7 @@ interface Signup {
 }
 
 describe('Autenticação e autorização (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let prisma: PrismaService;
   let a: Signup;
   let b: Signup;
@@ -62,10 +63,8 @@ describe('Autenticação e autorização (e2e)', () => {
       })
       .compile();
 
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
-    );
+    app = moduleRef.createNestApplication<NestExpressApplication>();
+    configureApp(app);
     await app.init();
     prisma = app.get(PrismaService);
 

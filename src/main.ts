@@ -1,30 +1,17 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import helmet from 'helmet';
 import { AppModule } from './app.module.js';
+import { configureApp } from './app-setup.js';
+import { validateEnv } from './config/env.validation.js';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  // Atrás de proxy/balanceador (o normal em produção), sem isto `req.ip` é o IP do proxy: o rate
-  // limit trataria todo mundo como um único cliente e a auditoria gravaria o IP errado.
-  // TRUST_PROXY = número de proxies na frente da API (ex.: 1). Só ligue se houver proxy: sem
-  // proxy, confiar no X-Forwarded-For deixaria qualquer cliente forjar o próprio IP.
-  const trustProxy = process.env.TRUST_PROXY?.trim();
-  if (trustProxy) {
-    app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
-  }
+  // Depois do create: o ConfigModule já carregou o .env no process.env. Em produção, segredo
+  // fraco ou de exemplo derruba a subida aqui, com o motivo no log, antes de abrir a porta.
+  validateEnv(process.env);
+  configureApp(app);
   // Faz o SIGTERM do `docker stop` fechar o Nest (e o pool do Prisma) em vez de matar o processo.
   app.enableShutdownHooks();
-  app.use(helmet());
-  app.enableCors();
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
   await app.listen(process.env.PORT ?? 3000);
 }
 await bootstrap();

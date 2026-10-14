@@ -148,6 +148,7 @@ model User {
   paymentsRecorded Payment[]
   tokens        UserToken[]
   legalAcceptances LegalAcceptance[]
+  sessions      Session[]
 
   @@index([tenantId])
   @@map("users")
@@ -198,6 +199,63 @@ model UserToken {
 
   @@index([userId, type])
   @@map("user_tokens")
+}
+
+// Sessão de login: nasce no login e acaba no logout, na troca de senha ou no prazo máximo. O
+// token de acesso (JWT curto) carrega o id dela (`sid`), e o JwtStrategy recusa token de sessão
+// encerrada: é isso que faz o logout valer na hora, sem esperar o token expirar.
+model Session {
+  id         String         @id @default(uuid())
+  userId     String         @map("user_id")
+  // Prazo máximo, contado do login: depois dele, só com login novo, por mais que a sessão
+  // esteja sendo renovada.
+  expiresAt  DateTime       @map("expires_at")
+  revokedAt  DateTime?      @map("revoked_at")
+  // User.passwordVersion quando a sessão nasceu. Qualquer troca de senha depois disso (própria,
+  // pelo admin, por email) faz o refresh recusar a sessão, mesmo que ela não tenha sido
+  // encerrada explicitamente.
+  passwordVersion Int       @map("password_version")
+  ip         String?        @db.VarChar(64)
+  userAgent  String?        @map("user_agent") @db.VarChar(300)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  lastUsedAt DateTime       @default(now()) @map("last_used_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// Refresh token da sessão (vai em cookie HttpOnly). Rotativo: cada uso gera um novo e marca o
+// anterior como usado. Um token já usado aparecendo de novo indica cópia (roubo), e a sessão
+// inteira é encerrada. Como os tokens de email, só o hash SHA-256 fica no banco.
+model RefreshToken {
+  id         String    @id @default(uuid())
+  sessionId  String    @map("session_id")
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  session    Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("refresh_tokens")
+}
+
+// Falhas de login por conta (o rate limit por IP não pega um ataque espalhado por muitos IPs
+// contra uma conta só). Chave = hash do email digitado, exista a conta ou não: a regra age igual
+// para email cadastrado e inexistente, sem revelar qual é qual, e o banco não guarda emails
+// digitados por terceiros. Sem FK de propósito.
+model LoginAttempt {
+  emailHash       String    @id @map("email_hash") @db.VarChar(64)
+  failedCount     Int       @map("failed_count")
+  windowStartedAt DateTime  @map("window_started_at")
+  lockedUntil     DateTime? @map("locked_until")
+
+  @@index([windowStartedAt])
+  @@map("login_attempts")
 }
 
 model Role {

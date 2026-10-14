@@ -13,6 +13,12 @@ O **esforço** é relativo: **P** (pequeno: um endpoint ou um ajuste de regra), 
 | 05 | [Cobrança das clínicas pela plataforma](05-cobranca-das-clinicas.md) | Manual no começo; plano e período de teste no banco quando houver mais clientes | P → M |
 | 06 | [Confirmação de email no cadastro](06-confirmacao-de-email-no-cadastro.md) | Confirmar o email do dono antes do primeiro login | P |
 
+## Decididas
+
+| # | Decisão | O que foi decidido | Quando |
+|---|---|---|---|
+| 07 | [Sessão, logout e onde o front guarda o token](07-sessao-e-token.md) | Token de acesso de 15 min em memória + refresh rotativo em cookie `HttpOnly` + `POST /auth/logout`. Domínio próprio exige a API servida no domínio da clínica (proxy) | 14/10/2026 |
+
 ## Dependências entre elas
 
 - **03 e 04 dependem de um fuso horário por clínica**, que hoje não existe: a API trabalha só em UTC. "Atende das 8h às 18h" e "lembrete às 9h da manhã" só fazem sentido no horário local da clínica. Se 03 ou 04 forem aprovadas, o fuso vira o primeiro passo.
