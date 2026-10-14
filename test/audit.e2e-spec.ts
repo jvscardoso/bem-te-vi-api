@@ -18,6 +18,7 @@ interface AuditRow {
   patientId: string | null;
   actorUserId: string;
   actor: { id: string; name: string | null };
+  patient: { id: string; fullName: string | null; removed: boolean } | null;
   entityType: string | null;
   entityId: string | null;
   details: Record<string, unknown> | null;
@@ -67,6 +68,43 @@ describe('Trilha de auditoria (e2e)', () => {
     });
     expect(view.ip).toBeTruthy();
     expect(view).not.toHaveProperty('tenantId');
+  });
+
+  it('cada registro traz o nome do paciente, sem gerar patient.view para quem lê a trilha', async () => {
+    const patient = await createPatient(ctx.http, a, { fullName: `Maria Auditada ${uniq()}` });
+    await ctx.http().get(patientsUrl(`/${patient.id}`)).set(a.auth).expect(200);
+
+    const before = (await logsOf(patient.id)).filter((row) => row.action === 'patient.view').length;
+    const rows = await logsOf(patient.id);
+    expect(rows.every((row) => row.patient?.id === patient.id && row.patient.fullName === patient.fullName)).toBe(true);
+    expect(rows[0].patient!.removed).toBe(false);
+    // Ler a trilha (duas vezes acima) não criou nenhum patient.view novo.
+    const after = (await logsOf(patient.id)).filter((row) => row.action === 'patient.view').length;
+    expect(after).toBe(before);
+  });
+
+  it('paciente removido vem com removed: true; registro sem paciente vem com patient: null', async () => {
+    const patient = await createPatient(ctx.http, a);
+    await ctx.http().delete(patientsUrl(`/${patient.id}`)).set(a.auth).expect(200);
+    const rows = await logsOf(patient.id);
+    expect(rows.find((row) => row.action === 'patient.delete')!.patient).toEqual({
+      id: patient.id,
+      fullName: patient.fullName,
+      removed: true,
+    });
+
+    await ctx.http().get(patientsUrl()).set(a.auth).expect(200);
+    const list = (await logs({ action: 'patient.list', pageSize: 1 })).data[0];
+    expect(list.patient).toBeNull();
+  });
+
+  it('paciente que não existe mais: fullName null e removed: true', async () => {
+    const patient = await createPatient(ctx.http, a);
+    await ctx.http().get(patientsUrl(`/${patient.id}`)).set(a.auth).expect(200);
+    // Sem rota que apague paciente de verdade: simula direto no banco (a trilha não tem FK).
+    await ctx.prisma.patient.delete({ where: { id: patient.id } });
+    const view = (await logsOf(patient.id)).find((row) => row.action === 'patient.view')!;
+    expect(view.patient).toEqual({ id: patient.id, fullName: null, removed: true });
   });
 
   it('criar, alterar, remover e restaurar ficam registrados; a alteração guarda de → para', async () => {

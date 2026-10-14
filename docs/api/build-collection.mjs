@@ -540,6 +540,17 @@ const pacientes = folder(
       test: [status(201), json, check('deletedAt nulo', 'b.deletedAt === null')],
     }),
     req('Paciente restaurado volta a aparecer', 'GET', '/tenants/{{tenantId}}/patients/{{patient2Id}}', { test: [status(200)] }),
+    req('Trilha de auditoria do paciente', 'GET', '/tenants/{{tenantId}}/audit-logs', {
+      description:
+        'Exige `audit:read`. Cada registro traz `actor: { id, name }` e `patient: { id, fullName, removed }` (`null` quando o registro não é de um paciente). Ler a trilha não gera `patient.view`.',
+      query: [['patientId', '{{patient2Id}}']],
+      test: [
+        status(200),
+        json,
+        check('remover e restaurar registrados', "b.data.some((r) => r.action === 'patient.delete') && b.data.some((r) => r.action === 'patient.restore')"),
+        check('nome do paciente em cada registro', "b.data.every((r) => r.patient && r.patient.id === pm.collectionVariables.get('patient2Id') && typeof r.patient.fullName === 'string' && r.patient.removed === false)"),
+      ],
+    }),
   ],
 );
 

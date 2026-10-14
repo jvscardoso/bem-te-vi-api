@@ -107,7 +107,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 
 ## LGPD
 
-- **Trilha de auditoria:** toda leitura e alteração de paciente e de ficha clínica, além de exportações e do encerramento de conta, é registrada com usuário, data, IP e navegador. As alterações guardam o valor antigo e o novo de cada campo. O conteúdo clínico nunca entra na trilha. **A trilha é imutável.** Só administradores (`audit:read`) consultam.
+- **Trilha de auditoria:** toda leitura e alteração de paciente e de ficha clínica, além de exportações e do encerramento de conta, é registrada com usuário, data, IP e navegador. As alterações guardam o valor antigo e o novo de cada campo. O conteúdo clínico nunca entra na trilha. **A trilha é imutável.** Só administradores (`audit:read`) consultam. A consulta mostra o nome do paciente de cada registro (e se ele foi removido), sem que consultar a trilha conte como abrir as fichas.
 - **Termos e Política:** aceite obrigatório no cadastro e no aceite de convite, com versão, data, IP e navegador. Versão nova publicada → aceite pendente para todos, e o bloqueio é feito pelo front.
 - **Direito de acesso do paciente:** exportação de tudo o que a clínica guarda sobre ele, num JSON legível, inclusive de paciente removido.
 - **Saída da clínica:**

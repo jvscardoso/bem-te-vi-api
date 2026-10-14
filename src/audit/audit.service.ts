@@ -52,8 +52,9 @@ export class AuditService {
     });
   }
 
-  // Mais recente primeiro, com desempate por id. O nome de quem agiu vem por consulta à parte
-  // (sem FK de propósito: o registro sobrevive ao usuário).
+  // Mais recente primeiro, com desempate por id. Os nomes de quem agiu e do paciente vêm por
+  // consulta à parte (sem FK de propósito: o registro sobrevive ao usuário e ao paciente), uma
+  // por página, não uma por linha.
   async list(tenantId: string, query: ListAuditLogsQueryDto) {
     const { page, pageSize, patientId, actorUserId, action, from, to } = query;
     const where: Prisma.AuditLogWhereInput = {
@@ -74,19 +75,39 @@ export class AuditService {
     ]);
 
     const actorIds = [...new Set(rows.map((row) => row.actorUserId))];
-    const actors = actorIds.length
-      ? await this.prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
-      : [];
+    const patientIds = [...new Set(rows.flatMap((row) => (row.patientId ? [row.patientId] : [])))];
+    // Pacientes lidos direto do banco, sem passar pelo PatientsService: ler a trilha não pode
+    // gerar um patient.view por linha (quem audita apareceria abrindo dezenas de fichas). Quem tem
+    // audit:read vê só o nome, nenhum dado clínico. Filtrado pela clínica, como tudo.
+    const [actors, patients] = await Promise.all([
+      actorIds.length
+        ? this.prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+        : [],
+      patientIds.length
+        ? this.prisma.patient.findMany({
+            where: { tenantId, id: { in: patientIds } },
+            select: { id: true, fullName: true, deletedAt: true },
+          })
+        : [],
+    ]);
     const nameById = new Map(actors.map((user) => [user.id, user.name]));
+    const patientById = new Map(patients.map((patient) => [patient.id, patient]));
 
     return pageOf(
       rows.map(({ tenantId: _tenantId, ...row }) => ({
         ...row,
         actor: { id: row.actorUserId, name: nameById.get(row.actorUserId) ?? null },
+        // null quando o registro não é de um paciente. removed (soft delete, ou o paciente não existe
+        // mais, e aí fullName vem null) para o front avisar que a ficha não abre.
+        patient: row.patientId ? this.patientView(row.patientId, patientById.get(row.patientId)) : null,
       })),
       total,
       page,
       pageSize,
     );
+  }
+
+  private patientView(id: string, patient?: { fullName: string; deletedAt: Date | null }) {
+    return { id, fullName: patient?.fullName ?? null, removed: !patient || patient.deletedAt !== null };
   }
 }

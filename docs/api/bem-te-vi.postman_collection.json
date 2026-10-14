@@ -2542,6 +2542,45 @@
               }
             }
           ]
+        },
+        {
+          "name": "Trilha de auditoria do paciente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/audit-logs?patientId={{patient2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "audit-logs"
+              ],
+              "query": [
+                {
+                  "key": "patientId",
+                  "value": "{{patient2Id}}"
+                }
+              ]
+            },
+            "description": "Exige `audit:read`. Cada registro traz `actor: { id, name }` e `patient: { id, fullName, removed }` (`null` quando o registro não é de um paciente). Ler a trilha não gera `patient.view`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"remover e restaurar registrados\", () => pm.expect(b.data.some((r) => r.action === 'patient.delete') && b.data.some((r) => r.action === 'patient.restore')).to.be.true);",
+                  "pm.test(\"nome do paciente em cada registro\", () => pm.expect(b.data.every((r) => r.patient && r.patient.id === pm.collectionVariables.get('patient2Id') && typeof r.patient.fullName === 'string' && r.patient.removed === false)).to.be.true);"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
