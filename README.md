@@ -87,7 +87,7 @@ Fonte da verdade: `prisma/schema.prisma`; explicação completa em [docs/banco-d
 
 ## Estrutura
 
-Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
+Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
 
 Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 
@@ -357,6 +357,16 @@ A clínica precisa conseguir **sair levando os dados** e pedir que a plataforma 
 
 **A plataforma não apaga dados de clínica por conta própria** (só a pedido dela). A guarda de prontuário depois da saída passa a ser da clínica, com o arquivo exportado — vale um advogado confirmar prazos e redação dos Termos sobre isso.
 
+## Configurações de tela (`src/configs`)
+
+Configurações de tela da clínica, uma por clínica, iguais para a equipe toda. Hoje: o **layout da tela inicial** (quais blocos aparecem, em que ordem e com que largura). O catálogo de blocos é do front; a API só guarda e devolve a lista, validando a forma.
+
+- `GET /tenants/:tenantId/configs` — **qualquer usuário da clínica** (o front monta a tela com isto; outra clínica continua dando `403`). Por isso nada sensível entra em `/configs`. Resposta: `{ "layouts": { "home": <layout> | null } }`. Toda tela conhecida vem no objeto; `null` = nunca configurada (o front usa o padrão dele). Layout: `{ version, widgets: [{ id, type, width }], updatedAt, updatedBy: { id, name } }`.
+- `PUT /tenants/:tenantId/configs/layouts/:screen` — `tenant:manage`. Corpo `{ version, widgets }`, que substitui o salvo (a ordem da lista é a da tela); responde `200` com o layout salvo. Tela fora da lista do código (hoje só `home`) → `404` "Tela não encontrada". Validação (`400`): `version` igual a `1` (versão do formato); `widgets` com 0 a 24 itens; `id` de 1 a 40 caracteres (`^[a-zA-Z0-9_-]+$`), único na lista; `type` de 1 a 50 (`^[a-z0-9-]+$`), **sem conferir catálogo** (bloco novo no front não exige mudança na API); `width` em `full`, `two-thirds`, `half`, `third`; campo extra recusado.
+- `DELETE /tenants/:tenantId/configs/layouts/:screen` — `tenant:manage`, `204`. Apaga o layout salvo (volta ao padrão do front); idempotente.
+- Armazenamento genérico (`TenantConfig`): uma linha por chave (`layouts.home`), `value` em JSON. Configuração nova não precisa de coluna nova. Sem auditoria: não há dado de paciente.
+- Cada bloco continua sujeito às permissões de quem vê: o front esconde, por exemplo, o bloco de cobranças de quem não tem `billing:read`, e os dados vêm das rotas de sempre, já protegidas.
+
 ## Backoffice da plataforma (`src/platform`)
 
 Gerencia as clínicas **como contas** (listar, suspender/reativar) — não é um jeito de acessar prontuário, agenda ou anamnese de nenhuma clínica; isso continua isolado por `TenantAccessGuard` como sempre foi, sem exceção.
@@ -406,7 +416,7 @@ Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e 
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) + auditoria das dependências de produção (`audit-ci`: falha em vulnerabilidade alta ou crítica; as exceções conhecidas, todas do CLI do Prisma, ficam explicadas em `audit-ci.jsonc`) |
 | `secrets` | Varredura de segredos no histórico inteiro do git (gitleaks): nenhum `.env`, chave ou senha real pode entrar no repositório |
 | `unit` | `npm test` (95 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (520 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `e2e` | `npm run test:e2e` (535 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real, recusa de segredo fraco em produção) e a imagem Docker em si. Gera um `JWT_SECRET` aleatório, já que a imagem recusa o de exemplo |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -415,12 +425,12 @@ Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e 
 
 Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
 
-- `bem-te-vi.postman_collection.json` — 10 pastas, 91 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca, papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
+- `bem-te-vi.postman_collection.json` — 10 pastas, 95 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca (inclui configurações de tela), papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
 - `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
 
 **Como usar:** suba a API, importe os dois arquivos (o Postman guarda o cookie de sessão sozinho e o reenvia no refresh e no logout), selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
 
-**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 91 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 95 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
 
 **Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
 
@@ -460,4 +470,5 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `legal.e2e-spec.ts` — aceite de Termos/Política: versões públicas, obrigatório no cadastro e no aceite de convite (versão errada dá 400 e nada é criado; o link do convite não é gasto), registro com IP/navegador, pendências em `/auth/me` para quem foi criado com senha, e versão nova publicada (pendência só do documento que mudou, histórico preservado).
   - `patient-export.e2e-spec.ts` — exportação do paciente: anexo JSON com cadastro, fichas com rótulos (na ordem do formulário, campo removido do formulário com `label: null`), agenda e cobranças com pagamentos; auditada; paciente removido também exporta; permissão `patients:export` e isolamento.
   - `tenant-closure.e2e-spec.ts` — saída da clínica: exportação completa sem nenhum segredo (logo em base64, convites pendentes não vazam token) e com as duas permissões exigidas; pedido de encerramento com senha, carência de 30 dias, emails para quem pediu e para a plataforma, cancelamento e auditoria; exclusão pela plataforma só com pedido, depois da carência e confirmando o subdomínio, apagando tudo e deixando a prova em `TenantDeletion`.
+  - `configs.e2e-spec.ts` — configurações de tela: nada salvo (`home: null`), salvar com `updatedAt`/`updatedBy`, leitura por qualquer usuário e escrita só com `tenant:manage`, substituição e lista vazia, tipo de bloco desconhecido aceito, tela desconhecida (404), validação (largura, id repetido, mais de 24, versão, formato, campo extra), voltar ao padrão (idempotente) e isolamento.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

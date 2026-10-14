@@ -41,6 +41,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 |---|---|---|
 | `Tenant` (`tenants`) | A clínica | `subdomain` único; `customDomain` único, com token e data de verificação DNS; `status` (`active`/`suspended`); `isPlatform` (a clínica que hospeda o painel da plataforma); durações padrão e mínima de atendimento; `closureRequestedAt` (pedido de encerramento) |
 | `TenantBranding` (`tenant_branding`) | Marca: nome fantasia, logo (URL) e cores | 1:1 com a clínica |
+| `TenantConfig` (`tenant_configs`) | Configurações de tela da clínica (ex.: `layouts.home`) | Chave composta `(tenant_id, key)`; `value` em JSON; quem alterou por último sem FK (nome lido à parte) |
 | `TenantLogo` (`tenant_logos`) | Bytes do logo enviado por upload | Separado da marca para os bytes não virem em toda leitura; o `id` muda a cada upload (URL imutável) |
 | `TenantDeletion` (`tenant_deletions`) | Prova de exclusão de uma clínica | **Sem FK:** é o único registro que sobra depois da exclusão |
 | `User` (`users`) | Usuário de uma clínica | **Email único em toda a plataforma**, sempre em minúsculas; `status` (`active`/`invited`/`disabled`); `passwordVersion` (invalida tokens antigos); duração própria de atendimento |
@@ -83,7 +84,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
   - ficha, agendamento, cobrança e pagamento → usuário: autor e profissional precisam continuar existindo.
 - Por causa desses `Restrict`, **apagar uma clínica exige uma ordem**: fichas → formulários → cobranças (pagamentos em cascata) → agendamentos → pacientes → usuários → clínica. Essa ordem está em `PlatformService.deleteTenant` e no helper dos testes (`cleanupTenants`).
 - As **FKs não garantem que o registro é da mesma clínica**: essa checagem é dos serviços.
-- **O que vai em cascata:** `UserToken`, `Session` (e os `RefreshToken` dela) e `LegalAcceptance` com o usuário; `TenantBranding`, `TenantLogo`, `Role` e `AuditLog` com a clínica; `Payment` com a cobrança.
+- **O que vai em cascata:** `UserToken`, `Session` (e os `RefreshToken` dela) e `LegalAcceptance` com o usuário; `TenantBranding`, `TenantLogo`, `TenantConfig`, `Role` e `AuditLog` com a clínica; `Payment` com a cobrança.
 
 ## Extensões e SQL fora do Prisma
 
@@ -113,6 +114,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `tenant_closure` | `closure_requested_at` na clínica e `tenant_deletions` |
 | `sessions_and_login_attempts` | `sessions`, `refresh_tokens` e `login_attempts` (refresh token e bloqueio por tentativas) |
 | `appointments_attend_permission` | Permissão `appointments:attend`, dada ao papel Admin do cadastro (todo o catálogo, exceto `platform:*`) e a todo papel com usuário que já foi profissional de algum agendamento |
+| `tenant_configs` | `tenant_configs` (configurações de tela da clínica) |
 | `session_password_version` | `sessions.password_version` (o refresh recusa sessão aberta antes de uma troca de senha) |
 
 **Migrations com dado:** as que criam permissões também as concedem a papéis já existentes, para ninguém perder acesso no deploy. "Papel de administrador" = papel com `users:manage` + `roles:manage` + `tenant:manage`, a mesma definição do `AccessPolicyService`.

@@ -47,6 +47,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 | `legal` | Versões vigentes de Termos e Política e registro dos aceites |
 | `account` | Tokens de uso único (recuperação de senha, convite) e montagem dos emails de conta |
 | `mail` | `EmailSender` plugável; implementação SMTP |
+| `configs` | Configurações de tela da clínica (`/configs`): hoje, o layout da tela inicial |
 | `platform` | Painel da plataforma: listar, suspender e excluir clínicas |
 | `prisma` | `PrismaService` (pool `pg` com keepalive) |
 | `common` | Paginação, filtro de erros do Prisma, validação (`ValidationPipe` com erros em português, `@RequiredText`), middlewares, `RequestContext`, utilitários |

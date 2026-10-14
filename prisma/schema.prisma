@@ -62,8 +62,26 @@ model Tenant {
   appointments  Appointment[]
   anamnesisTemplates AnamnesisTemplate[]
   auditLogs     AuditLog[]
+  configs       TenantConfig[]
 
   @@map("tenants")
+}
+
+// Configurações de tela da clínica (ex.: "layouts.home", o layout da tela inicial). Uma linha
+// por chave: configuração nova não precisa de coluna nova. Lida por todo usuário da clínica,
+// então nada sensível entra aqui. Sem FK para quem alterou, como na auditoria: o nome é lido à
+// parte.
+model TenantConfig {
+  tenantId        String   @map("tenant_id")
+  key             String   @db.VarChar(100)
+  value           Json
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  updatedByUserId String   @map("updated_by_user_id")
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, key])
+  @@map("tenant_configs")
 }
 
 // Prova de que uma clínica foi excluída, quando, a pedido de quando e por qual admin da

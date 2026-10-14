@@ -90,6 +90,11 @@ const BY_CLASS: Record<string, FieldLabel> = {
   'UpdateChargeDto.description': f('Descrição da cobrança'),
   'CreatePaymentDto.amountCents': m('Valor do pagamento'),
   'CreatePaymentDto.notes': m('Campo de observações do pagamento'),
+  'SaveLayoutDto.version': f('Versão do layout'),
+  'SaveLayoutDto.widgets': f('Lista de blocos'),
+  'LayoutWidgetDto.id': m('Id do bloco'),
+  'LayoutWidgetDto.type': m('Tipo do bloco'),
+  'LayoutWidgetDto.width': f('Largura do bloco'),
 };
 
 export function fieldLabel(className: string | undefined, property: string): FieldLabel {

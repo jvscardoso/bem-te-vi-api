@@ -30,7 +30,7 @@ npx --yes newman@6.2.2 run docs/api/bem-te-vi.postman_collection.json -e docs/ap
 
 ## Arquitetura em resumo
 
-- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail` e `platform`. Banco via `PrismaService`.
+- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs` e `platform`. Banco via `PrismaService`.
 - Rotas de negócio aninhadas em `/tenants/:tenantId/...`. Rotas públicas usam `@Public()`.
 - Guards globais, nesta ordem: Throttler → JwtAuth → TenantAccess (o `:tenantId` da URL precisa ser o do token) → Permissions (`@RequirePermissions(...)`, com E lógico entre as permissões).
 - O JWT só prova identidade: o `JwtStrategy` relê usuário, clínica e permissões **a cada requisição**. `passwordVersion` no token derruba as sessões na troca de senha.

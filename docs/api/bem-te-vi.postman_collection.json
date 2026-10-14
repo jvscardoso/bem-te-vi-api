@@ -712,6 +712,155 @@
               }
             }
           ]
+        },
+        {
+          "name": "Configurações de tela (nada salvo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/configs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "configs"
+              ]
+            },
+            "description": "Qualquer usuário da clínica lê (o front monta a tela inicial com isto). Toda tela conhecida vem no objeto; `null` = nunca configurada, e o front usa o padrão dele."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"home ainda null\", () => pm.expect(b.layouts.home === null).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Salvar o layout da tela inicial",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/configs/layouts/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "configs",
+                "layouts",
+                "home"
+              ]
+            },
+            "description": "Exige `tenant:manage`. Um layout por clínica, igual para a equipe toda. A lista substitui a salva (a ordem é a da tela). `type` não é conferido contra um catálogo (o catálogo de blocos é do front); `width`: `full`, `two-thirds`, `half` ou `third`; até 24 blocos, `id` único.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": 1,\n  \"widgets\": [\n    {\n      \"id\": \"w-1\",\n      \"type\": \"financial-summary\",\n      \"width\": \"full\"\n    },\n    {\n      \"id\": \"w-2\",\n      \"type\": \"today-count\",\n      \"width\": \"third\"\n    },\n    {\n      \"id\": \"w-3\",\n      \"type\": \"today-agenda\",\n      \"width\": \"two-thirds\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"3 blocos, com quem salvou\", () => pm.expect(b.widgets.length === 3 && b.updatedBy.id === pm.collectionVariables.get('ownerId')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Layout com largura inválida",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/configs/layouts/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "configs",
+                "layouts",
+                "home"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": 1,\n  \"widgets\": [\n    {\n      \"id\": \"w-1\",\n      \"type\": \"agenda\",\n      \"width\": \"quarter\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"erro no campo width\", () => pm.expect(b.errors[0].field === 'widgets.0.width').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Voltar ao padrão",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/configs/layouts/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "configs",
+                "layouts",
+                "home"
+              ]
+            },
+            "description": "Apaga o layout salvo: a tela volta a vir `null` e o front usa o padrão dele. Idempotente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },

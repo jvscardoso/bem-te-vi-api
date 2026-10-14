@@ -248,6 +248,32 @@ const clinica = folder(
       query: [['host', 'nao-existe-{{suffix}}']],
       test: [status(404)],
     }),
+    req('Configurações de tela (nada salvo)', 'GET', '/tenants/{{tenantId}}/configs', {
+      description:
+        'Qualquer usuário da clínica lê (o front monta a tela inicial com isto). Toda tela conhecida vem no objeto; `null` = nunca configurada, e o front usa o padrão dele.',
+      test: [status(200), json, check('home ainda null', 'b.layouts.home === null')],
+    }),
+    req('Salvar o layout da tela inicial', 'PUT', '/tenants/{{tenantId}}/configs/layouts/home', {
+      description:
+        'Exige `tenant:manage`. Um layout por clínica, igual para a equipe toda. A lista substitui a salva (a ordem é a da tela). `type` não é conferido contra um catálogo (o catálogo de blocos é do front); `width`: `full`, `two-thirds`, `half` ou `third`; até 24 blocos, `id` único.',
+      body: {
+        version: 1,
+        widgets: [
+          { id: 'w-1', type: 'financial-summary', width: 'full' },
+          { id: 'w-2', type: 'today-count', width: 'third' },
+          { id: 'w-3', type: 'today-agenda', width: 'two-thirds' },
+        ],
+      },
+      test: [status(200), json, check('3 blocos, com quem salvou', "b.widgets.length === 3 && b.updatedBy.id === pm.collectionVariables.get('ownerId')")],
+    }),
+    req('Layout com largura inválida', 'PUT', '/tenants/{{tenantId}}/configs/layouts/home', {
+      body: { version: 1, widgets: [{ id: 'w-1', type: 'agenda', width: 'quarter' }] },
+      test: [status(400), json, check('erro no campo width', "b.errors[0].field === 'widgets.0.width'")],
+    }),
+    req('Voltar ao padrão', 'DELETE', '/tenants/{{tenantId}}/configs/layouts/home', {
+      description: 'Apaga o layout salvo: a tela volta a vir `null` e o front usa o padrão dele. Idempotente.',
+      test: [status(204)],
+    }),
   ],
 );
 

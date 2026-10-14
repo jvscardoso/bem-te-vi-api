@@ -20,6 +20,13 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 - **Duração de atendimento:** padrão (30 min) e mínima (5 min) por clínica. A padrão não pode ser menor que a mínima, e a mínima não pode ficar acima da duração própria de algum profissional.
 - **Suspensão** é ação da plataforma, nunca da própria clínica. Clínica suspensa: ninguém loga, sessões abertas caem e a marca pública responde `404`.
 
+## Configurações de tela
+
+- **Layout da tela inicial:** quais blocos aparecem, em que ordem e com que largura (inteira, 2/3, metade, 1/3). **Um por clínica**, igual para a equipe toda; quem tem `tenant:manage` edita ou volta ao padrão. Todo usuário da clínica lê.
+- O catálogo de blocos é do front: a API aceita qualquer tipo com formato válido, até 24 blocos, id único.
+- Cada bloco continua sujeito às permissões de quem vê (o front esconde o que o usuário não pode ver).
+- Nada sensível entra nas configurações de tela, porque todos leem.
+
 ## Marca e endereço (whitelabel)
 
 - Marca: nome fantasia, logo (upload PNG/JPEG/WebP até 1 MB, SVG recusado; ou URL `https`) e cores `#RRGGBB`.
