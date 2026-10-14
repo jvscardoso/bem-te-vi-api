@@ -9,7 +9,7 @@ import type { AppointmentStatus, Prisma } from '@prisma/client';
 import { pageOf, type Page } from '../common/pagination/page.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
-import { APPOINTMENTS_ALL } from './appointments-scope.js';
+import { APPOINTMENTS_ALL, APPOINTMENTS_ATTEND } from './appointments-scope.js';
 import { CreateAppointmentDto } from './dto/create-appointment.dto.js';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto.js';
 import { FindAppointmentsQueryDto } from './dto/find-appointments-query.dto.js';
@@ -283,13 +283,27 @@ export class AppointmentsService {
     }
   }
 
+  // Só quem atende pacientes (appointments:attend no papel) recebe agendamento. Vale para criar e
+  // para trocar o profissional; um agendamento antigo de quem perdeu a permissão continua
+  // editável sem trocar o profissional (o update só chama isto quando ele muda).
   private async getActiveProfessional(tenantId: string, professionalId: string) {
     const professional = await this.prisma.user.findFirst({
       where: { id: professionalId, tenantId, status: 'active' },
-      select: { id: true, defaultAppointmentDurationMinutes: true },
+      select: {
+        id: true,
+        defaultAppointmentDurationMinutes: true,
+        role: {
+          select: {
+            permissions: { where: { permission: { key: APPOINTMENTS_ATTEND } }, select: { permissionId: true } },
+          },
+        },
+      },
     });
     if (!professional) {
       throw new BadRequestException('professionalId inválido para este tenant');
+    }
+    if (professional.role.permissions.length === 0) {
+      throw new BadRequestException('Este usuário não atende pacientes');
     }
     return professional;
   }

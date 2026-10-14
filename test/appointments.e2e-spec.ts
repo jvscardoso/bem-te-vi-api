@@ -95,12 +95,13 @@ describe('Agenda de consultas (e2e)', () => {
     });
 
     it('o profissional ajusta a própria duração sem precisar de users:manage', async () => {
-      const [read, write] = await permissionIds(ctx.prisma, ['appointments:read', 'appointments:write']);
+      // Quem atende: agenda própria (read + write) e appointments:attend, sem users:manage.
+      const ids = await permissionIds(ctx.prisma, ['appointments:read', 'appointments:write', 'appointments:attend']);
       const role = await ctx
         .http()
         .post(`/tenants/${a.tenantId}/roles`)
         .set(a.auth)
-        .send({ name: `Profissional ${Date.now()}`, permissionIds: [read, write] })
+        .send({ name: `Profissional ${Date.now()}`, permissionIds: ids })
         .expect(201);
       const prof = await professional('prof-self', { roleId: role.body.id });
 

@@ -29,8 +29,9 @@ export class UsersController {
   }
 
   // O próprio profissional ajusta a duração dos seus atendimentos sem precisar de
-  // 'users:manage' (a permissão do handler substitui a do controller).
-  @RequirePermissions('appointments:write')
+  // 'users:manage' (a permissão do handler substitui a do controller). Só quem atende tem
+  // duração própria para ajustar.
+  @RequirePermissions('appointments:attend')
   @Patch('me/appointment-settings')
   updateOwnAppointmentSettings(
     @Param('tenantId') tenantId: string,

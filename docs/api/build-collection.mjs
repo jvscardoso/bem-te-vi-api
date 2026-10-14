@@ -267,6 +267,7 @@ const papeis = folder(
         set('permPatientsWrite', "id('patients:write')"),
         set('permAppointmentsRead', "id('appointments:read')"),
         set('permAppointmentsWrite', "id('appointments:write')"),
+        set('permAppointmentsAttend', "id('appointments:attend')"),
         set('permUsersManage', "id('users:manage')"),
         set('permRolesManage', "id('roles:manage')"),
         set('permTenantManage', "id('tenant:manage')"),
@@ -274,7 +275,7 @@ const papeis = folder(
       ],
     }),
     req('Criar papel "Gestor"', 'POST', '/tenants/{{tenantId}}/roles', {
-      description: 'Atende pacientes e agenda e também gerencia usuários — mas **não** papéis nem a clínica. É o papel do usuário limitado usado nas pastas seguintes.',
+      description: 'Atende pacientes (`appointments:attend`: aparece como profissional e recebe agendamentos), agenda e também gerencia usuários — mas **não** papéis nem a clínica. É o papel do usuário limitado usado nas pastas seguintes.',
       body: {
         name: 'Gestor',
         description: 'Atende pacientes e agenda e gerencia usuários',
@@ -283,10 +284,11 @@ const papeis = folder(
           '{{permPatientsWrite}}',
           '{{permAppointmentsRead}}',
           '{{permAppointmentsWrite}}',
+          '{{permAppointmentsAttend}}',
           '{{permUsersManage}}',
         ],
       },
-      test: [status(201), json, set('gestorRoleId', 'b.id'), check('5 permissões', 'b.permissions.length === 5')],
+      test: [status(201), json, set('gestorRoleId', 'b.id'), check('6 permissões', 'b.permissions.length === 6')],
     }),
     req('Obter papel', 'GET', '/tenants/{{tenantId}}/roles/{{gestorRoleId}}', { test: [status(200)] }),
     req('Atualizar papel', 'PATCH', '/tenants/{{tenantId}}/roles/{{gestorRoleId}}', {
@@ -327,7 +329,10 @@ const usuarios = folder(
       },
       test: [status(201), json, set('professionalId', 'b.id'), set('professionalEmail', 'b.email')],
     }),
-    req('Obter usuário', 'GET', '/tenants/{{tenantId}}/users/{{professionalId}}', { test: [status(200)] }),
+    req('Obter usuário', 'GET', '/tenants/{{tenantId}}/users/{{professionalId}}', {
+      description: '`attendsPatients` (só leitura) diz se o papel do usuário tem `appointments:attend`: o front decide por ele se mostra a duração de atendimento.',
+      test: [status(200), json, check('atende pacientes', 'b.attendsPatients === true')],
+    }),
     req('Atualizar usuário', 'PATCH', '/tenants/{{tenantId}}/users/{{professionalId}}', {
       body: { name: 'Dra. Helena Souza' },
       test: [status(200), json, check('nome novo', "b.name === 'Dra. Helena Souza'")],
@@ -335,11 +340,11 @@ const usuarios = folder(
     req('Login (Gestor)', 'POST', '/auth/login', {
       auth: 'none',
       body: { email: '{{professionalEmail}}', password: '{{password}}' },
-      test: [status(200), json, set('gestorToken', 'b.accessToken'), check('5 permissões', 'b.user.permissions.length === 5')],
+      test: [status(200), json, set('gestorToken', 'b.accessToken'), check('6 permissões', 'b.user.permissions.length === 6')],
     }),
     req('Minha duração de atendimento (Gestor)', 'PATCH', '/tenants/{{tenantId}}/users/me/appointment-settings', {
       auth: 'gestorToken',
-      description: 'O próprio profissional ajusta a duração sem precisar de `users:manage`. Vale o mínimo da clínica (15 min).',
+      description: 'O próprio profissional ajusta a duração sem precisar de `users:manage` (exige `appointments:attend`: quem não atende não tem duração própria). Vale o mínimo da clínica (15 min).',
       body: { defaultAppointmentDurationMinutes: 50 },
       test: [status(200), json, check('duração 50', 'b.defaultAppointmentDurationMinutes === 50')],
     }),

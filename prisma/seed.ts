@@ -11,6 +11,12 @@ const PERMISSIONS = [
   // Estende appointments:read/write à agenda de todos os profissionais (recepção, dono).
   // Sem ela, o usuário só vê e mexe nos agendamentos em que ele é o profissional.
   { key: 'appointments:all', description: 'Ver e gerenciar a agenda de todos os profissionais' },
+  // Quem atende pacientes: aparece como profissional e pode receber agendamentos. Independente
+  // das outras (a recepção tem read + write + all, sem attend).
+  {
+    key: 'appointments:attend',
+    description: 'Atende pacientes: tem agenda própria e pode ser o profissional de um agendamento',
+  },
   { key: 'users:manage', description: 'Gerenciar usuários do tenant' },
   { key: 'roles:manage', description: 'Gerenciar papéis e permissões' },
   { key: 'tenant:manage', description: 'Gerenciar dados e marca do tenant' },

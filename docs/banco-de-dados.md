@@ -45,7 +45,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `TenantDeletion` (`tenant_deletions`) | Prova de exclusão de uma clínica | **Sem FK:** é o único registro que sobra depois da exclusão |
 | `User` (`users`) | Usuário de uma clínica | **Email único em toda a plataforma**, sempre em minúsculas; `status` (`active`/`invited`/`disabled`); `passwordVersion` (invalida tokens antigos); duração própria de atendimento |
 | `Role` (`roles`) | Papel da clínica | Nome único por clínica |
-| `Permission` (`permissions`) | Catálogo **global** de permissões (14 chaves) | Populado pelo seed e por migrations |
+| `Permission` (`permissions`) | Catálogo **global** de permissões (15 chaves) | Populado pelo seed e por migrations |
 | `RolePermission` (`role_permissions`) | Permissões de cada papel | Chave composta |
 | `UserToken` (`user_tokens`) | Links de uso único (`password_reset`, `invite`) | Só o hash SHA-256; `expiresAt`, `usedAt` |
 | `Session` (`sessions`) | Sessão de login (o `sid` do JWT) | `expiresAt` = prazo máximo (24 h); `revokedAt` (logout, troca de senha, reuso de refresh); `passwordVersion` em que nasceu; IP, navegador e último uso. Vencidas são apagadas no login seguinte do usuário |
@@ -112,6 +112,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `patients_export_permission` | Permissão `patients:export` (só para papéis de administrador) |
 | `tenant_closure` | `closure_requested_at` na clínica e `tenant_deletions` |
 | `sessions_and_login_attempts` | `sessions`, `refresh_tokens` e `login_attempts` (refresh token e bloqueio por tentativas) |
+| `appointments_attend_permission` | Permissão `appointments:attend`, dada ao papel Admin do cadastro (todo o catálogo, exceto `platform:*`) e a todo papel com usuário que já foi profissional de algum agendamento |
 | `session_password_version` | `sessions.password_version` (o refresh recusa sessão aberta antes de uma troca de senha) |
 
 **Migrations com dado:** as que criam permissões também as concedem a papéis já existentes, para ninguém perder acesso no deploy. "Papel de administrador" = papel com `users:manage` + `roles:manage` + `tenant:manage`, a mesma definição do `AccessPolicyService`.

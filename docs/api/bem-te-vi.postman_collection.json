@@ -750,6 +750,7 @@
                   "pm.collectionVariables.set('permPatientsWrite', id('patients:write'));",
                   "pm.collectionVariables.set('permAppointmentsRead', id('appointments:read'));",
                   "pm.collectionVariables.set('permAppointmentsWrite', id('appointments:write'));",
+                  "pm.collectionVariables.set('permAppointmentsAttend', id('appointments:attend'));",
                   "pm.collectionVariables.set('permUsersManage', id('users:manage'));",
                   "pm.collectionVariables.set('permRolesManage', id('roles:manage'));",
                   "pm.collectionVariables.set('permTenantManage', id('tenant:manage'));",
@@ -775,10 +776,10 @@
                 "roles"
               ]
             },
-            "description": "Atende pacientes e agenda e também gerencia usuários — mas **não** papéis nem a clínica. É o papel do usuário limitado usado nas pastas seguintes.",
+            "description": "Atende pacientes (`appointments:attend`: aparece como profissional e recebe agendamentos), agenda e também gerencia usuários — mas **não** papéis nem a clínica. É o papel do usuário limitado usado nas pastas seguintes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Gestor\",\n  \"description\": \"Atende pacientes e agenda e gerencia usuários\",\n  \"permissionIds\": [\n    \"{{permPatientsRead}}\",\n    \"{{permPatientsWrite}}\",\n    \"{{permAppointmentsRead}}\",\n    \"{{permAppointmentsWrite}}\",\n    \"{{permUsersManage}}\"\n  ]\n}",
+              "raw": "{\n  \"name\": \"Gestor\",\n  \"description\": \"Atende pacientes e agenda e gerencia usuários\",\n  \"permissionIds\": [\n    \"{{permPatientsRead}}\",\n    \"{{permPatientsWrite}}\",\n    \"{{permAppointmentsRead}}\",\n    \"{{permAppointmentsWrite}}\",\n    \"{{permAppointmentsAttend}}\",\n    \"{{permUsersManage}}\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -795,7 +796,7 @@
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('gestorRoleId', b.id);",
-                  "pm.test(\"5 permissões\", () => pm.expect(b.permissions.length === 5).to.be.true);"
+                  "pm.test(\"6 permissões\", () => pm.expect(b.permissions.length === 6).to.be.true);"
                 ]
               }
             }
@@ -1076,7 +1077,8 @@
                 "users",
                 "{{professionalId}}"
               ]
-            }
+            },
+            "description": "`attendsPatients` (só leitura) diz se o papel do usuário tem `appointments:attend`: o front decide por ele se mostra a duração de atendimento."
           },
           "event": [
             {
@@ -1084,7 +1086,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"atende pacientes\", () => pm.expect(b.attendsPatients === true).to.be.true);"
                 ]
               }
             }
@@ -1168,7 +1172,7 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('gestorToken', b.accessToken);",
-                  "pm.test(\"5 permissões\", () => pm.expect(b.user.permissions.length === 5).to.be.true);"
+                  "pm.test(\"6 permissões\", () => pm.expect(b.user.permissions.length === 6).to.be.true);"
                 ]
               }
             }
@@ -1192,7 +1196,7 @@
                 "appointment-settings"
               ]
             },
-            "description": "O próprio profissional ajusta a duração sem precisar de `users:manage`. Vale o mínimo da clínica (15 min).",
+            "description": "O próprio profissional ajusta a duração sem precisar de `users:manage` (exige `appointments:attend`: quem não atende não tem duração própria). Vale o mínimo da clínica (15 min).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"defaultAppointmentDurationMinutes\": 50\n}",

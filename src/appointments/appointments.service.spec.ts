@@ -18,7 +18,12 @@ function setup({ tenantDefault = 30, tenantMin = 5, professionalDefault = null a
     },
     patient: { findFirst: vi.fn(async () => ({ id: 'patient-1' })) },
     user: {
-      findFirst: vi.fn(async () => ({ id: 'pro-1', defaultAppointmentDurationMinutes: professionalDefault })),
+      // Papel com appointments:attend (a consulta filtra a permissão; uma linha = tem).
+      findFirst: vi.fn(async () => ({
+        id: 'pro-1',
+        defaultAppointmentDurationMinutes: professionalDefault,
+        role: { permissions: [{ permissionId: 'perm-attend' }] },
+      })),
     },
     tenant: {
       findUniqueOrThrow: vi.fn(async () => ({
@@ -86,6 +91,14 @@ describe('tenant isolation', () => {
     expect(prisma.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'pro-1', tenantId: TENANT, status: 'active' } }),
     );
+    expect(prisma.appointment.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects create when the professional does not attend patients (no appointments:attend)', async () => {
+    const { prisma, service } = setup();
+    prisma.user.findFirst.mockResolvedValue({ id: 'pro-1', defaultAppointmentDurationMinutes: null, role: { permissions: [] } });
+
+    await expect(service.create(TENANT, RECEPTION, createDto)).rejects.toThrow('Este usuário não atende pacientes');
     expect(prisma.appointment.create).not.toHaveBeenCalled();
   });
 
@@ -233,7 +246,11 @@ describe('update', () => {
   it('checks overlaps against the new professional when the professional changes', async () => {
     const { prisma, service } = setup();
     prisma.appointment.findFirst.mockResolvedValueOnce(existingAppointment()).mockResolvedValue(null);
-    prisma.user.findFirst.mockResolvedValue({ id: 'pro-2', defaultAppointmentDurationMinutes: null });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'pro-2',
+      defaultAppointmentDurationMinutes: null,
+      role: { permissions: [{ permissionId: 'perm-attend' }] },
+    });
 
     await service.update(TENANT, RECEPTION, 'a1', { professionalId: 'pro-2' });
 

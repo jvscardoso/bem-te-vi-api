@@ -38,6 +38,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 | `patients:export` | Exportar todos os dados de um paciente (LGPD) |
 | `appointments:read` / `appointments:write` | Ver / mexer **na própria agenda** |
 | `appointments:all` | Estende as duas acima à agenda de **todos** os profissionais |
+| `appointments:attend` | **Atende pacientes:** aparece como profissional, recebe agendamentos e tem duração própria. Independente das outras (a recepção tem `read` + `write` + `all`, sem `attend`) |
 | `anamnesis_templates:manage` | Criar, editar e apagar formulários de anamnese |
 | `billing:read` / `billing:write` | Ver / operar cobranças e pagamentos |
 | `users:manage` / `roles:manage` / `tenant:manage` | Usuários / papéis / dados, marca, domínio e encerramento da clínica |
@@ -90,8 +91,9 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
   - listar a agenda de outro → `403`;
   - abrir, editar ou cancelar agendamento de outro → `404`;
   - criar na agenda de outro, ou mover um agendamento para outro → `403`;
-  - a lista de profissionais traz só ele mesmo.
-- **Profissional** = qualquer usuário ativo da clínica.
+  - a lista de profissionais traz só ele mesmo (se ele atende; senão, vem vazia).
+- **Profissional** = usuário ativo cujo papel tem `appointments:attend`. Só ele aparece na lista de profissionais (colunas da agenda, seletor do agendamento) e pode receber agendamento novo (`400` "Este usuário não atende pacientes"). Agendamentos antigos de quem perdeu a permissão continuam valendo e editáveis; só a troca **para** quem não atende é recusada.
+- **Duração própria** (Minha conta): só quem atende. No cadastro de usuário, o campo é aceito para todos, mas só tem efeito para quem atende; `GET /users` traz `attendsPatients` para o front decidir se mostra o campo.
 - Listagem por janela `from`/`to` **por sobreposição** (entra quem ocupa algum instante da janela).
 
 ## Financeiro

@@ -17,9 +17,27 @@ import { UpdateAppointmentSettingsDto } from './dto/update-appointment-settings.
 import { ListUsersQueryDto } from './dto/list-users-query.dto.js';
 import { pageOf } from '../common/pagination/page.js';
 import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
-import { APPOINTMENTS_ALL } from '../appointments/appointments-scope.js';
+import { APPOINTMENTS_ALL, APPOINTMENTS_ATTEND } from '../appointments/appointments-scope.js';
 
 const SALT_ROUNDS = 12;
+
+// Papel com appointments:attend: quem atende pacientes (é profissional da agenda).
+const ATTENDS_PATIENTS = { role: { permissions: { some: { permission: { key: APPOINTMENTS_ATTEND } } } } };
+
+// Traz só a linha da permissão attend do papel (uma ou nenhuma), para calcular attendsPatients.
+const ATTEND_PERMISSION_INCLUDE = {
+  role: {
+    select: {
+      permissions: { where: { permission: { key: APPOINTMENTS_ATTEND } }, select: { permissionId: true } },
+    },
+  },
+} as const;
+
+// `attendsPatients` (só leitura): o formulário de usuário do front decide por ele se mostra a
+// duração de atendimento, sem precisar ler os papéis (que exigem roles:manage).
+function withAttendsPatients<T extends { role: { permissions: unknown[] } }>({ role, ...user }: T) {
+  return { ...user, attendsPatients: role.permissions.length > 0 };
+}
 
 @Injectable()
 export class UsersService {
@@ -98,24 +116,26 @@ export class UsersService {
       this.prisma.user.findMany({
         where,
         omit: USER_SECRET_FIELDS,
+        include: ATTEND_PERMISSION_INCLUDE,
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
       this.prisma.user.count({ where }),
     ]);
-    return pageOf(data, total, page, pageSize);
+    return pageOf(data.map(withAttendsPatients), total, page, pageSize);
   }
 
   async findOne(tenantId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId },
       omit: USER_SECRET_FIELDS,
+      include: ATTEND_PERMISSION_INCLUDE,
     });
     if (!user) {
       throw new NotFoundException(`Usuário ${id} não encontrado`);
     }
-    return user;
+    return withAttendsPatients(user);
   }
 
   async update(tenantId: string, actor: AuthenticatedUser, id: string, dto: UpdateUserDto) {
@@ -177,11 +197,13 @@ export class UsersService {
     });
   }
 
-  // Quem pode ser escolhido como profissional num agendamento: usuários ativos (é o mesmo
-  // critério que AppointmentsService aplica). Campos mínimos, para liberar a quem só tem
+  // Quem pode ser escolhido como profissional num agendamento: usuários ativos cujo papel tem
+  // appointments:attend (é o mesmo critério que AppointmentsService aplica). A recepção, sem
+  // ela, não vira coluna na agenda nem opção no agendamento. Campos mínimos, para liberar a quem só tem
   // acesso à agenda sem expor email/status/papel. A duração efetiva evita que o cliente
   // precise ler as configurações da clínica (que exigem tenant:manage) para prever o fim.
-  // Sem appointments:all, a lista é só o próprio usuário: é a única agenda que ele pode usar.
+  // Sem appointments:all, a lista é só o próprio usuário (se ele atende): é a única agenda que
+  // ele pode usar.
   async findProfessionals(tenantId: string, actor: AuthenticatedUser) {
     const ownOnly = !actor.permissions.includes(APPOINTMENTS_ALL);
     const [tenant, users] = await Promise.all([
@@ -190,7 +212,7 @@ export class UsersService {
         select: { defaultAppointmentDurationMinutes: true },
       }),
       this.prisma.user.findMany({
-        where: { tenantId, status: 'active', ...(ownOnly ? { id: actor.userId } : {}) },
+        where: { tenantId, status: 'active', ...ATTENDS_PATIENTS, ...(ownOnly ? { id: actor.userId } : {}) },
         select: { id: true, name: true, defaultAppointmentDurationMinutes: true },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       }),

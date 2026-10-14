@@ -33,7 +33,12 @@ describe('Agenda: escopo própria agenda × todas (e2e)', () => {
     owner = await signupTenant(ctx.http, 'scope');
     patient = await createPatient(ctx.http, owner);
 
-    const ids = await permissionIds(ctx.prisma, ['appointments:read', 'appointments:write', 'patients:read']);
+    const ids = await permissionIds(ctx.prisma, [
+      'appointments:read',
+      'appointments:write',
+      'appointments:attend',
+      'patients:read',
+    ]);
     const role = await ctx
       .http()
       .post(`/tenants/${owner.tenantId}/roles`)
