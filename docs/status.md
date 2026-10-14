@@ -7,7 +7,7 @@
 A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 95 testes unitários e 514 e2e passando.
+- 95 testes unitários e 520 e2e passando.
 - Coleção do Postman: 91 requisições e 145 asserções verdes contra a stack em Docker.
 - `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
@@ -23,7 +23,7 @@ A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, ana
 | Anamnese | Formulários configuráveis, fichas validadas e imutáveis |
 | Agenda | Duração por profissional ou clínica, sem sobreposição (com lock), transições de status, janela por sobreposição, escopo própria × todas, profissional = quem tem `appointments:attend` |
 | Financeiro | Cobranças, pagamentos parciais (com lock), atraso calculado, resumo |
-| Painel da plataforma | Listar e buscar, suspender e reativar, excluir clínica encerrada |
+| Painel da plataforma | Listar e buscar (com filtro de encerramento pedido ou pronto para excluir), suspender e reativar, excluir clínica encerrada |
 | LGPD | Trilha de auditoria imutável; aceite de Termos e Política; exportação do paciente; exportação completa e encerramento de conta |
 | Validação | Erros em português em toda a API, com `errors: [{ field, code, message }]` |
 | Operação | Docker (API + Postgres + Mailpit), CI com 5 jobs (inclui auditoria de dependências e varredura de segredos), CORS fechado, recusa de segredo fraco em produção, logs sem dado sensível, `TRUST_PROXY`, rate limit, helmet |
@@ -45,11 +45,11 @@ Antes de criar uma task, veja o maior número nos dois índices.
 | 14 | Validação do cadastro de clínica antes da landing | Alta (antes de abrir para clientes) | ✅ Feita em 14/10/2026 (front: task 22) |
 | 15 | Links de email com subdomínio em dev (`*.localhost`) | Baixa | Pendente |
 | 16 | Nome do paciente nos registros da auditoria | Média | ✅ Feita em 14/10/2026 (front: task 24) |
-| 17 | Encerramentos pedidos no painel da plataforma | Média | Pendente |
+| 17 | Encerramentos pedidos no painel da plataforma | Média | ✅ Feita em 14/10/2026 (front: task 25) |
 | 18 | Configurações de tela (`/configs`), começando pelo layout da tela inicial | Média | Pendente |
 | 19 | Revisão de segurança antes de produção (par da task 20 do front) | Alta (antes de produção) | ✅ Feita em 14/10/2026 (front: task 21) |
 
-A situação detalhada fica no índice. As pendentes (15, 17 e 18) seguem a prioridade do produto.
+A situação detalhada fica no índice. As pendentes (15 e 18) seguem a prioridade do produto.
 
 **Revisão de segurança (task 19), registrada em 14/10/2026:**
 - **CORS** fechado (`CorsOriginPolicy`): domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e localhost fora de produção.
@@ -62,7 +62,7 @@ A situação detalhada fica no índice. As pendentes (15, 17 e 18) seguem a prio
 
 ### Tasks para o front
 
-Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) e a 24 (nome do paciente na tela de Auditoria). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
+Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) e a 25 (filtro de encerramentos no painel da plataforma). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
 
 | Task | Assunto | Observação |
 |---|---|---|

@@ -53,6 +53,7 @@ const BY_PROPERTY: Record<string, FieldLabel> = {
   page: f('Página'),
   pageSize: m('Tamanho da página'),
   q: m('Termo de busca'),
+  closure: m('Filtro de encerramento'),
   description: f('Descrição'),
   amountCents: m('Valor'),
   dueDate: m('Vencimento'),

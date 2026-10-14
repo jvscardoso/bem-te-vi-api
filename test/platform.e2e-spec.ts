@@ -236,6 +236,76 @@ describe('Backoffice da plataforma (e2e)', () => {
     });
   });
 
+  // A listagem é global e os outros arquivos criam clínicas (e pedidos de encerramento) em
+  // paralelo: cada teste busca só as clínicas dele, pela marca única no nome.
+  describe('encerramentos pedidos (filtro closure e deletionAvailableAt)', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    let tag: string;
+    let semPedido: TestTenant;
+    let antigo: TestTenant;
+    let recente: TestTenant;
+    let antigoAt: Date;
+    let recenteAt: Date;
+
+    const listed = async (query: Record<string, string>) => {
+      const res = await listUrl({ q: tag, pageSize: 100, ...query }).set(platform.auth).expect(200);
+      return res.body.data as { id: string; closureRequestedAt: string | null; deletionAvailableAt: string | null }[];
+    };
+
+    beforeAll(async () => {
+      tag = `encerra${uniq()}`;
+      semPedido = await newTenant(`${tag}-a`);
+      antigo = await newTenant(`${tag}-b`);
+      recente = await newTenant(`${tag}-c`);
+      antigoAt = new Date(Date.now() - 40 * DAY);
+      recenteAt = new Date(Date.now() - DAY);
+      await ctx.prisma.tenant.update({ where: { id: antigo.tenantId }, data: { closureRequestedAt: antigoAt } });
+      await ctx.prisma.tenant.update({ where: { id: recente.tenantId }, data: { closureRequestedAt: recenteAt } });
+    });
+
+    afterEach(() => {
+      delete process.env.TENANT_DELETION_GRACE_DAYS;
+    });
+
+    it('cada clínica traz deletionAvailableAt: pedido + carência (30 dias por padrão), ou null sem pedido', async () => {
+      const byId = new Map((await listed({})).map((t) => [t.id, t]));
+      expect(byId.size).toBe(3);
+      expect(byId.get(semPedido.tenantId)!.deletionAvailableAt).toBeNull();
+      expect(byId.get(antigo.tenantId)!.deletionAvailableAt).toBe(new Date(antigoAt.getTime() + 30 * DAY).toISOString());
+      expect(byId.get(recente.tenantId)!.deletionAvailableAt).toBe(new Date(recenteAt.getTime() + 30 * DAY).toISOString());
+    });
+
+    it('closure=requested: só quem pediu, do pedido mais antigo ao mais novo', async () => {
+      expect((await listed({ closure: 'requested' })).map((t) => t.id)).toEqual([antigo.tenantId, recente.tenantId]);
+    });
+
+    it('closure=deletable: só quem já passou da carência', async () => {
+      expect((await listed({ closure: 'deletable' })).map((t) => t.id)).toEqual([antigo.tenantId]);
+    });
+
+    it('a carência segue TENANT_DELETION_GRACE_DAYS (no filtro e na data)', async () => {
+      process.env.TENANT_DELETION_GRACE_DAYS = '0';
+      const deletable = await listed({ closure: 'deletable' });
+      expect(deletable.map((t) => t.id)).toEqual([antigo.tenantId, recente.tenantId]);
+      expect(deletable[1].deletionAvailableAt).toBe(recenteAt.toISOString());
+    });
+
+    it('o filtro bate com a regra da exclusão: a "pronta" exclui, a em carência dá 409', async () => {
+      const del = (t: TestTenant, confirmSubdomain: string) =>
+        ctx.http().delete(`/platform/tenants/${t.tenantId}`).set(platform.auth).send({ confirmSubdomain });
+      const subdomainOf = async (t: TestTenant) =>
+        (await ctx.prisma.tenant.findUniqueOrThrow({ where: { id: t.tenantId } })).subdomain;
+      await del(recente, await subdomainOf(recente)).expect(409);
+      await del(antigo, await subdomainOf(antigo)).expect(204);
+      expect((await listed({ closure: 'requested' })).map((t) => t.id)).toEqual([recente.tenantId]);
+    });
+
+    it('filtro inválido → 400', async () => {
+      const res = await listUrl({ closure: 'todas' }).set(platform.auth).expect(400);
+      expect(res.body.errors[0]).toMatchObject({ field: 'closure', code: 'isIn' });
+    });
+  });
+
   describe('suspender e reativar', () => {
     it('suspende: o dono perde acesso na hora e não consegue mais logar', async () => {
       const clinic = await newTenant('susp');

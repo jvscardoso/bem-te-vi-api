@@ -119,6 +119,6 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 
 ## Painel da plataforma
 
-- Lista e busca clínicas (com contagem de usuários e pacientes e o pedido de encerramento), suspende e reativa, e exclui definitivamente as clínicas que pediram, depois da carência.
+- Lista e busca clínicas (com contagem de usuários e pacientes, o pedido de encerramento e a data em que a exclusão fica liberada), filtra as que pediram o encerramento ou as já prontas para excluir, suspende e reativa, e exclui definitivamente as clínicas que pediram, depois da carência.
 - A clínica-plataforma não aparece na lista e não pode ser suspensa nem excluída.
 - O primeiro admin é criado por script (`npm run bootstrap:platform`), nunca pelo cadastro público.

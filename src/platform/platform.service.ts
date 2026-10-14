@@ -3,10 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { pageOf } from '../common/pagination/page.js';
-import type { ListPlatformTenantsQueryDto } from './dto/list-platform-tenants-query.dto.js';
+import type { ClosureFilter, ListPlatformTenantsQueryDto } from './dto/list-platform-tenants-query.dto.js';
 import type { UpdateTenantStatusDto } from './dto/update-tenant-status.dto.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
-import { deletionAvailableAt } from '../tenants/tenant-closure.js';
+import { deletionAvailableAt, deletionGraceDays } from '../tenants/tenant-closure.js';
 
 const TENANT_SUMMARY_SELECT = {
   id: true,
@@ -26,15 +26,17 @@ export class PlatformService {
     private readonly config: ConfigService,
   ) {}
 
-  // Ordem por nome com desempate por id (a paginação não repete nem pula clínicas).
+  // Ordem por nome com desempate por id (a paginação não repete nem pula clínicas). Com o filtro
+  // de encerramento, pela data do pedido, do mais antigo (o primeiro a ficar liberado) ao mais novo.
   // SQL cru só para achar os ids da página: o Prisma não expressa unaccent/ILIKE por palavra.
   // A própria clínica-plataforma nunca aparece (nem por busca — a condição é sempre AND).
-  async findAllTenants({ q, page, pageSize }: ListPlatformTenantsQueryDto) {
-    const where = this.searchCondition(q);
+  async findAllTenants({ q, page, pageSize, closure }: ListPlatformTenantsQueryDto) {
+    const where = this.searchCondition(q, closure);
+    const order = closure ? Prisma.sql`closure_requested_at ASC, id ASC` : Prisma.sql`name ASC, id ASC`;
     const [idRows, countRows] = await Promise.all([
       this.prisma.$queryRaw<{ id: string }[]>`
         SELECT id FROM tenants WHERE ${where}
-        ORDER BY name ASC, id ASC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+        ORDER BY ${order} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
       this.prisma.$queryRaw<{ total: bigint }[]>`
         SELECT COUNT(*) AS total FROM tenants WHERE ${where}`,
     ]);
@@ -46,8 +48,22 @@ export class PlatformService {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const total = Number(countRows[0]?.total ?? 0);
 
+    // deletionAvailableAt: quando a exclusão definitiva fica liberada (a mesma conta de
+    // GET /tenants/:id/closure e da checagem em deleteTenant), para o painel não supor a carência.
     return pageOf(
-      ids.flatMap((id) => byId.get(id) ?? []),
+      ids.flatMap((id) => {
+        const tenant = byId.get(id);
+        return tenant
+          ? [
+              {
+                ...tenant,
+                deletionAvailableAt: tenant.closureRequestedAt
+                  ? deletionAvailableAt(tenant.closureRequestedAt, this.config)
+                  : null,
+              },
+            ]
+          : [];
+      }),
       total,
       page,
       pageSize,
@@ -122,8 +138,15 @@ export class PlatformService {
   // Cada palavra da busca precisa casar em nome, subdomínio ou domínio próprio (AND entre
   // palavras, OR entre campos). Tudo parametrizado; os curingas do LIKE digitados pelo
   // usuário são escapados para valerem como texto literal — igual à busca de pacientes.
-  private searchCondition(q: string | undefined) {
+  private searchCondition(q: string | undefined, closure: ClosureFilter | undefined) {
     const conditions = [Prisma.sql`is_platform = false`];
+    if (closure === 'requested') {
+      conditions.push(Prisma.sql`closure_requested_at IS NOT NULL`);
+    } else if (closure === 'deletable') {
+      // Pedido feito há pelo menos a carência: o mesmo corte que deleteTenant aplica.
+      const cutoff = new Date(Date.now() - deletionGraceDays(this.config) * 24 * 60 * 60 * 1000);
+      conditions.push(Prisma.sql`closure_requested_at <= ${cutoff}`);
+    }
 
     for (const token of (q ?? '').split(/\s+/).filter(Boolean)) {
       const pattern = `%${token.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
