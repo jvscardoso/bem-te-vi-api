@@ -7,7 +7,7 @@
 A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 95 testes unitários e 535 e2e passando.
+- 99 testes unitários e 535 e2e passando.
 - Coleção do Postman: 95 requisições e 152 asserções verdes contra a stack em Docker.
 - `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
@@ -44,13 +44,13 @@ Antes de criar uma task, veja o maior número nos dois índices.
 | 12 | Busca de pacientes também pelo telefone | Média | ✅ Feita em 14/10/2026 (front: só textos de ajuda, ver índice) |
 | 13 | Permissão `appointments:attend` (quem atende pacientes) | Média; corrige regra que aparece errada nas telas | ✅ Feita em 14/10/2026 (front: task 23) |
 | 14 | Validação do cadastro de clínica antes da landing | Alta (antes de abrir para clientes) | ✅ Feita em 14/10/2026 (front: task 22) |
-| 15 | Links de email com subdomínio em dev (`*.localhost`) | Baixa | Pendente |
+| 15 | Links de email com subdomínio em dev (`*.localhost`) | Baixa | ✅ Feita em 14/10/2026 (front: task 27) |
 | 16 | Nome do paciente nos registros da auditoria | Média | ✅ Feita em 14/10/2026 (front: task 24) |
 | 17 | Encerramentos pedidos no painel da plataforma | Média | ✅ Feita em 14/10/2026 (front: task 25) |
 | 18 | Configurações de tela (`/configs`), começando pelo layout da tela inicial | Média | ✅ Feita em 14/10/2026 (front: task 26) |
 | 19 | Revisão de segurança antes de produção (par da task 20 do front) | Alta (antes de produção) | ✅ Feita em 14/10/2026 (front: task 21) |
 
-A situação detalhada fica no índice. Pendente: só a 15 (prioridade baixa).
+A situação detalhada fica no índice. Todos os pedidos do front até aqui (12 a 19) estão feitos na API.
 
 **Revisão de segurança (task 19), registrada em 14/10/2026:**
 - **CORS** fechado (`CorsOriginPolicy`): domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e localhost fora de produção.
@@ -63,7 +63,7 @@ A situação detalhada fica no índice. Pendente: só a 15 (prioridade baixa).
 
 ### Tasks para o front
 
-Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma) e a 26 (ligar o salvar do editor da tela inicial). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
+Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma), a 26 (ligar o salvar do editor da tela inicial) e a 27 (remover o modo `?tenant=` em dev). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
 
 | Task | Assunto | Observação |
 |---|---|---|

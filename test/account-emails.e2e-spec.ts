@@ -69,9 +69,9 @@ describe('Emails de conta: recuperação de senha e convite (e2e)', () => {
 
       const email = await lastEmailTo(user.email);
       expect(email.subject).toContain('redefinição de senha');
-      // Dev (sem APP_BASE_DOMAIN): FRONTEND_URL padrão, com a clínica em ?tenant=.
-      expect(email.text).toContain(`http://localhost:5173/reset-password?token=`);
-      expect(email.text).toContain(`tenant=${subA}`);
+      // Dev (sem APP_BASE_DOMAIN): FRONTEND_URL padrão (localhost), com a clínica no host.
+      expect(email.text).toContain(`http://${subA}.localhost:5173/reset-password?token=`);
+      expect(email.text).not.toContain('tenant=');
       expect(email.html).toContain('href=');
 
       const res = await reset(tokenIn(email.text)).expect(200);
@@ -133,7 +133,7 @@ describe('Emails de conta: recuperação de senha e convite (e2e)', () => {
       await forgot({ email: user.email, host: 'site-malicioso.test' }).expect(204);
       const email = await lastEmailTo(user.email);
       expect(email.text).not.toContain('site-malicioso');
-      expect(email.text).toContain(`tenant=${subA}`);
+      expect(email.text).toContain(`http://${subA}.localhost:5173/`);
     });
 
     it('com APP_BASE_DOMAIN, o link vai para <sub>.<APP_BASE_DOMAIN> por https', async () => {
@@ -203,7 +203,8 @@ describe('Emails de conta: recuperação de senha e convite (e2e)', () => {
 
       const message = await lastEmailTo(email);
       expect(message.subject).toContain('Convite para acessar');
-      expect(message.text).toContain('http://localhost:5173/accept-invite?token=');
+      expect(message.text).toContain(`http://${subA}.localhost:5173/accept-invite?token=`);
+      expect(message.text).not.toContain('tenant=');
       expect(message.text).toContain('Dra. Convidada');
 
       const res = await accept(tokenIn(message.text)).expect(200);
