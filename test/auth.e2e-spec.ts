@@ -4,6 +4,8 @@ import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app-setup.js';
+import { JobQueue } from '../src/jobs/job-queue.js';
+import { FakeJobQueue } from './helpers/e2e.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
 // Roda contra o Postgres do .env (precisa de `docker compose up -d` + migrate + seed).
@@ -61,6 +63,9 @@ describe('Autenticação e autorização (e2e)', () => {
           timeToBlockExpire: 0,
         }),
       })
+      // Sem o pg-boss de verdade (ver FakeJobQueue).
+      .overrideProvider(JobQueue)
+      .useValue(new FakeJobQueue())
       .compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();

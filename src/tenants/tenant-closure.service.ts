@@ -39,7 +39,7 @@ export class TenantClosureService {
     }
 
     const where = { tenantId };
-    const [users, roles, patients, templates, records, appointments, charges, auditLogs, legalAcceptances] =
+    const [users, roles, patients, templates, records, appointments, charges, auditLogs, legalAcceptances, patientConsents, configs] =
       await Promise.all([
         this.prisma.user.findMany({ where, omit: USER_SECRET_FIELDS, orderBy: { createdAt: 'asc' } }),
         this.prisma.role.findMany({
@@ -54,6 +54,8 @@ export class TenantClosureService {
         this.prisma.charge.findMany({ where, orderBy: { dueDate: 'asc' }, include: { payments: { orderBy: { paidAt: 'asc' } } } }),
         this.prisma.auditLog.findMany({ where, orderBy: { createdAt: 'asc' } }),
         this.prisma.legalAcceptance.findMany({ where, orderBy: { acceptedAt: 'asc' } }),
+        this.prisma.patientConsent.findMany({ where, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+        this.prisma.tenantConfig.findMany({ where, orderBy: { key: 'asc' } }),
       ]);
 
     await this.audit.record(actor, {
@@ -76,6 +78,8 @@ export class TenantClosureService {
       charges,
       auditLogs,
       legalAcceptances,
+      patientConsents,
+      configs,
     };
   }
 

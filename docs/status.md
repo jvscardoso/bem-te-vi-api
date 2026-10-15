@@ -7,8 +7,8 @@
 A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 99 testes unitários e 535 e2e passando.
-- Coleção do Postman: 95 requisições e 152 asserções verdes contra a stack em Docker.
+- 116 testes unitários e 560 e2e passando.
+- Coleção do Postman: 96 requisições e 156 asserções verdes contra a stack em Docker.
 - `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
 
@@ -17,10 +17,12 @@ A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, ana
 | Área | O que existe |
 |---|---|
 | Clínica | Cadastro público com aceite de termos e validação completa (texto obrigatório, subdomínio DNS válido e não reservado, domínio próprio fora do domínio da plataforma); configurações de duração; suspensão pela plataforma |
+| Fuso horário | Por clínica (IANA); "hoje" do financeiro no fuso dela |
+| Fila e agendador | pg-boss no próprio Postgres; faxina diária de sessões e contadores de login |
 | Configurações de tela | Layout da tela inicial por clínica (`/configs`), editado por quem tem `tenant:manage`, lido por todos |
 | Whitelabel | Marca, upload de logo, domínio próprio com verificação DNS, marca pública por host, login restrito ao endereço |
 | Acesso | Login (tempo constante, sem enumeração, bloqueio por conta depois de 10 senhas erradas), sessões com token de acesso de 15 min + refresh rotativo em cookie `HttpOnly` + logout que vale na hora, JWT com estado relido a cada requisição, RBAC com 15 permissões, sem escalada de privilégio, sempre um admin, convite por email, troca, redefinição e recuperação de senha |
-| Pacientes | CRUD, CPF único (inclusive removidos), soft delete e restauração, busca sem acento por nome, CPF ou telefone |
+| Pacientes | CRUD, CPF único (inclusive removidos), soft delete e restauração, busca sem acento por nome, CPF ou telefone, telefone normalizado (E.164), consentimento para WhatsApp e marketing com histórico |
 | Anamnese | Formulários configuráveis, fichas validadas e imutáveis |
 | Agenda | Duração por profissional ou clínica, sem sobreposição (com lock), transições de status, janela por sobreposição, escopo própria × todas, profissional = quem tem `appointments:attend` |
 | Financeiro | Cobranças, pagamentos parciais (com lock), atraso calculado, resumo |
@@ -63,7 +65,7 @@ A situação detalhada fica no índice. Todos os pedidos do front até aqui (12 
 
 ### Tasks para o front
 
-Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma), a 26 (ligar o salvar do editor da tela inicial) e a 27 (remover o modo `?tenant=` em dev). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
+Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma), a 26 (ligar o salvar do editor da tela inicial), a 27 (remover o modo `?tenant=` em dev) e a 28 (fuso da clínica, telefone normalizado e consentimento do paciente). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
 
 | Task | Assunto | Observação |
 |---|---|---|
@@ -82,6 +84,12 @@ Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21
 
 **Decidida:** 7. **Sessão e token** (14/10/2026): token de acesso de 15 min em memória, refresh rotativo em cookie `HttpOnly`, logout no servidor. Ver `docs/decisoes/07-sessao-e-token.md`.
 
+**Em espera desde 14/10/2026 (o lançamento vem antes):** automação do WhatsApp e campanhas. O decidido está consolidado na task 30 (`docs/changes/30-atendimento-whatsapp-fase-1.md`). Detalhes: 8. **Marketing, atendimento por WhatsApp** (BSP, pg-boss, construtor de fluxos, começar pelo lembrete com confirmação; falta escolher o provedor e o opt-in; as conversas são pagas pela plataforma, incluídas nos planos da decisão 11). **Fase 0 feita em 14/10/2026:** fuso da clínica, telefone normalizado, consentimento e fila. 9. **Marketing, campanhas** (segmentos e campanhas; perguntas sobre sexo/gênero, duração e canal). 10. **Provedor do WhatsApp:** recomendação **Gupshup** (a plataforma paga as mensagens, incluídas nos planos; a Twilio quase dobra o custo por lembrete), falta confirmar. Ver `docs/decisoes/08` a `10`.
+
+**Decidida:** 11. **Planos e preços** (14/10/2026): por clínica, Individual R$ 99 / Essencial R$ 149 / Profissional R$ 299 / Completo R$ 549, com franquia de lembretes e limite de agendamentos pelo bot; teste de 14 dias sem cartão no Essencial, sem WhatsApp (depois, só leitura por 30 dias e suspensão); desconto anual; Asaas (task 29).
+
+**Roadmap** (decidido, sem data): várias unidades da mesma clínica. Ver `docs/roadmap/`.
+
 **Pendentes:**
 
 Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardando resposta:
@@ -96,7 +104,7 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 ## Falta para lançar
 
 **Infraestrutura (bloqueia o lançamento):**
-- Hospedagem, banco gerenciado e domínio do produto (`APP_BASE_DOMAIN`).
+- Hospedagem, banco gerenciado e domínio do produto (`APP_BASE_DOMAIN`). A infraestrutura inicial deve rodar no serviço de um possível sócio (14/10/2026); os custos operacionais por clínica (decisão 11) ficam para quando isso estiver definido.
 - DNS e certificado coringa para os subdomínios.
 - **HTTPS para domínios próprios das clínicas.** A API verifica a posse, mas não há nada que sirva o front com certificado nesses domínios. Exige emissão sob demanda (Caddy on-demand TLS, Cloudflare for SaaS ou similar).
 - **API servida também no domínio próprio de cada clínica** (proxy, ex.: `agenda.clinica.com.br/api`). Sem isso, o cookie de sessão é de terceiro nesses domínios, o navegador pode bloqueá-lo, e o usuário perde a sessão a cada 15 minutos. Cabe na mesma peça do item acima. Ver `docs/decisoes/07-sessao-e-token.md`.
@@ -120,11 +128,10 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 - Sessão de no máximo 24 h desde o login, mesmo em uso contínuo (o teto de 1 dia de antes). Sem lista de sessões ativas nem "sair de todos os dispositivos" (o modelo já guarda IP, navegador e último uso).
 - O bloqueio por tentativas pode ser usado para travar a conta de outra pessoa por 15 minutos (sabendo só o email). É o preço de não deixar adivinhar a senha por muitos IPs; a vítima pode redefinir a senha pelo email, o que também tira o bloqueio.
 - Sem busca em usuários, papéis e agenda; a agenda não filtra por vários profissionais de uma vez.
-- "Hoje" (atraso de cobrança) é calculado em UTC.
 - Agenda e financeiro não entram na trilha de auditoria. A trilha não tem política de retenção (fica enquanto a clínica existir).
 - Exportação completa da clínica é montada em memória: serve ao MVP; com bases grandes, vira assíncrona.
 - Busca de pacientes sem índice de trigram: suficiente para milhares de cadastros por clínica.
-- Emails em segundo plano sem fila: se o processo cair no meio do envio, o email se perde (o convite pode ser reenviado, a recuperação pedida de novo).
+- Emails em segundo plano ainda sem a fila (a fila existe desde a fase 0 do marketing, mas os emails não passaram por ela): se o processo cair no meio do envio, o email se perde (o convite pode ser reenviado, a recuperação pedida de novo).
 - `npm run lint` (modo type-aware) não roda em algumas máquinas Windows: o executável `tsgolint` falha ao abrir. O `npx oxlint src/ test/` funciona, e o CI roda o completo.
 - Os testes e2e podem falhar esporadicamente com `read ECONNRESET` no setup em Docker no Windows. O CI reexecuta o e2e uma vez.
 
@@ -139,5 +146,6 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 | `docs/regras-de-negocio.md` | Regras por domínio |
 | `docs/status.md` | Este arquivo |
 | `docs/decisoes/` | Decisões de produto (pendentes e decididas), com análise |
+| `docs/roadmap/` | Funcionalidades já decididas, sem data (ex.: várias unidades da mesma clínica) |
 | `docs/changes/` | Pedidos do front para a API (fora do git); tasks para o front ficam em `../bem-te-vi-web/docs/changes/` |
 | `docs/api/` | Coleção do Postman e o gerador dela |

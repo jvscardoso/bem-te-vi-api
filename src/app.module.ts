@@ -16,6 +16,7 @@ import { PlatformModule } from './platform/platform.module.js';
 import { BillingModule } from './billing/billing.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { ConfigsModule } from './configs/configs.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard.js';
 import { TenantAccessGuard } from './auth/guards/tenant-access.guard.js';
 import { PermissionsGuard } from './auth/guards/permissions.guard.js';
@@ -40,6 +41,7 @@ import { createValidationPipe } from './common/validation/validation-errors.js';
     BillingModule,
     AuditModule,
     ConfigsModule,
+    JobsModule,
   ],
   controllers: [AppController],
   providers: [

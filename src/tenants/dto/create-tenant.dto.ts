@@ -14,6 +14,7 @@ import {
 import { CreateTenantOwnerDto } from './create-tenant-owner.dto.js';
 import { LegalAcceptanceDto } from '../../legal/dto/legal-acceptance.dto.js';
 import { RequiredText } from '../../common/validation/required-text.decorator.js';
+import { IsIanaTimeZone } from '../../common/validation/time-zone.js';
 
 export class CreateTenantDto {
   @RequiredText(150)
@@ -47,6 +48,11 @@ export class CreateTenantDto {
   @Min(5)
   @Max(1440)
   minAppointmentDurationMinutes?: number;
+
+  // Fuso IANA da clínica (padrão America/Sao_Paulo). Gravado no nome canônico.
+  @IsOptional()
+  @IsIanaTimeZone()
+  timezone?: string;
 
   // Provisiona junto o primeiro usuário do tenant, com uma role "Admin"
   // que recebe automaticamente todas as permissões do catálogo.

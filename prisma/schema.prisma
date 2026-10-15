@@ -46,6 +46,11 @@ model Tenant {
   // (ex.: estética 30 min; psicologia com mínimo de 60 min).
   defaultAppointmentDurationMinutes Int @default(30) @map("default_appointment_duration_minutes")
   minAppointmentDurationMinutes     Int @default(5)  @map("min_appointment_duration_minutes")
+  // Fuso da clínica (nome IANA, ex.: America/Sao_Paulo, America/Manaus). As datas continuam em UTC
+  // no banco; o fuso diz o que é "hoje" e "amanhã às 9h" para a clínica (atraso de cobrança,
+  // lembretes, horários de atendimento). IANA, e não um deslocamento fixo, por causa de horário
+  // de verão.
+  timezone      String       @default("America/Sao_Paulo") @db.VarChar(64)
   // Pedido de encerramento da conta feito pela própria clínica (ver TenantClosureService).
   // A clínica continua funcionando durante a carência (para exportar os dados ou desistir);
   // depois dela, a plataforma pode excluir tudo definitivamente.
@@ -357,6 +362,10 @@ model Patient {
   cpf         String?   @db.VarChar(14)
   birthDate   DateTime? @map("birth_date") @db.Date
   phone       String?   @db.VarChar(20)
+  // O telefone em formato internacional (E.164, ex.: +5561988887777), calculado pela API a partir
+  // de `phone` (que é texto livre, como foi digitado). É por ele que a mensagem de WhatsApp que
+  // chega é ligada ao paciente. null quando `phone` não dá um número reconhecível.
+  phoneE164   String?   @map("phone_e164") @db.VarChar(16)
   email       String?   @db.VarChar(150)
   address     Json?
   notes       String?
@@ -368,10 +377,47 @@ model Patient {
   anamnesisRecords  AnamnesisRecord[]
   appointments      Appointment[]
   charges           Charge[]
+  consents          PatientConsent[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
+  @@index([tenantId, phoneE164])
   @@map("patients")
+}
+
+enum ConsentPurpose {
+  // Receber mensagens da clínica por WhatsApp sobre o atendimento (lembrete, confirmação).
+  whatsapp
+  // Receber campanhas de marketing.
+  marketing
+}
+
+enum ConsentSource {
+  // Registrado pela equipe da clínica (o paciente aceitou ou recusou na recepção, por exemplo).
+  staff
+  // Pedido do próprio paciente (ex.: respondeu "SAIR" no WhatsApp).
+  patient
+}
+
+// Consentimento do paciente para comunicação (LGPD; e a Meta exige opt-in para mensagens que a
+// clínica inicia por WhatsApp). Histórico: cada mudança vira uma linha, nunca sobrescrita; o
+// estado atual é a linha mais recente de cada finalidade. Sem linha = sem consentimento.
+model PatientConsent {
+  id               String         @id @default(uuid())
+  tenantId         String         @map("tenant_id")
+  patientId        String         @map("patient_id")
+  purpose          ConsentPurpose
+  granted          Boolean
+  source           ConsentSource
+  // Quem registrou, quando foi a equipe. Sem FK, como na auditoria.
+  recordedByUserId String?        @map("recorded_by_user_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  patient          Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, purpose, createdAt])
+  @@index([tenantId])
+  @@map("patient_consents")
 }
 
 // Formulário de anamnese configurável por tenant: cada clínica define seus próprios campos

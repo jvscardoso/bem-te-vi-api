@@ -2,6 +2,9 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma, type Patient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { PatientConsentsService } from './patient-consents.service.js';
+import { normalizePhone } from './phone.js';
+import type { UpdatePatientConsentsDto } from './dto/update-patient-consents.dto.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
@@ -25,6 +28,7 @@ export class PatientsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly consents: PatientConsentsService,
   ) {}
 
   async create(tenantId: string, actor: AuthenticatedUser, dto: CreatePatientDto) {
@@ -50,10 +54,20 @@ export class PatientsService {
     return page;
   }
 
+  // O detalhe traz o consentimento atual (WhatsApp, marketing), para a ficha mostrar e editar.
   async findOne(tenantId: string, actor: AuthenticatedUser, id: string) {
     const patient = await this.getActive(tenantId, id);
+    const consents = await this.consents.current(id);
     await this.audit.record(actor, { action: 'patient.view', patientId: id });
-    return patient;
+    return { ...patient, consents };
+  }
+
+  async updateConsents(tenantId: string, actor: AuthenticatedUser, id: string, dto: UpdatePatientConsentsDto) {
+    if (dto.whatsapp === undefined && dto.marketing === undefined) {
+      throw new BadRequestException('Informe ao menos um consentimento (whatsapp ou marketing)');
+    }
+    await this.getActive(tenantId, id);
+    return this.consents.updateByStaff(actor, id, dto);
   }
 
   // Registra o que mudou (de → para), campo a campo: a trilha guarda o histórico do cadastro,
@@ -71,10 +85,12 @@ export class PatientsService {
 
   // `null` limpa o campo (contrato de todo PATCH). Precisa de tradução em dois casos:
   // data vira Date, e Json nulo no Prisma exige Prisma.DbNull (um `null` cru é recusado).
+  // phoneE164 acompanha o telefone sempre que ele é enviado (não é campo do DTO: a API calcula).
   private toData<T extends UpdatePatientDto>(dto: T) {
     const { birthDate, address, ...rest } = dto;
     return {
       ...rest,
+      ...(dto.phone !== undefined ? { phoneE164: normalizePhone(dto.phone) } : {}),
       birthDate: birthDate === null ? null : birthDate ? new Date(birthDate) : undefined,
       address: address === null ? Prisma.DbNull : (address as Prisma.InputJsonValue | undefined),
     };

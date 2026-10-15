@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { PatientConsentsService } from './patient-consents.service.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import type { AnamnesisFieldDefinition } from '../anamnesis-templates/anamnesis-answers.validator.js';
 
@@ -17,6 +18,7 @@ export class PatientExportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly consents: PatientConsentsService,
   ) {}
 
   async export(tenantId: string, actor: AuthenticatedUser, patientId: string) {
@@ -25,7 +27,7 @@ export class PatientExportService {
       throw new NotFoundException(`Paciente ${patientId} não encontrado`);
     }
 
-    const [tenant, records, appointments, charges] = await Promise.all([
+    const [tenant, records, appointments, charges, consents] = await Promise.all([
       this.prisma.tenant.findUniqueOrThrow({
         where: { id: tenantId },
         select: { name: true, branding: { select: { tradeName: true } } },
@@ -66,6 +68,7 @@ export class PatientExportService {
           },
         },
       }),
+      this.consents.history(patientId),
     ]);
 
     await this.audit.record(actor, {
@@ -92,6 +95,8 @@ export class PatientExportService {
       })),
       appointments,
       charges,
+      // Histórico de consentimento para comunicação (WhatsApp, marketing), do mais antigo ao mais novo.
+      consents,
     };
   }
 

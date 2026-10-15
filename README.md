@@ -11,6 +11,7 @@ API do bem-te-vi — SaaS whitelabel de gestão de clínicas: marca e endereço 
 | [docs/banco-de-dados.md](docs/banco-de-dados.md) | Modelo de dados, integridade, SQL fora do Prisma, histórico de migrations |
 | [docs/regras-de-negocio.md](docs/regras-de-negocio.md) | Regras de negócio por domínio |
 | [docs/decisoes/](docs/decisoes/) | Decisões de produto pendentes, com opções e recomendação |
+| [docs/roadmap/](docs/roadmap/00-indice.md) | Funcionalidades já decididas, sem data (ex.: várias unidades da mesma clínica) |
 | `docs/changes/` | Pedidos do front para a API (fora do git). As tasks para o front ficam em `../bem-te-vi-web/docs/changes/` |
 | [docs/api/](docs/api/) | Coleção do Postman e o gerador dela |
 
@@ -87,7 +88,7 @@ Fonte da verdade: `prisma/schema.prisma`; explicação completa em [docs/banco-d
 
 ## Estrutura
 
-Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
+Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
 
 Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 
@@ -143,6 +144,8 @@ A rota é usada pela landing page (outro projeto), então a API valida tudo sozi
 - **CPF único por tenant, inclusive entre removidos.** O CPF de um paciente removido continua reservado, para não duplicar cadastro/prontuário. Tentar cadastrar (ou trocar para) esse CPF devolve `409` com `removedPatientId`, para o cliente oferecer "restaurar".
 - No `PATCH`, `null` limpa qualquer campo opcional (inclusive `birthDate` e `address`, que precisam de tradução para o Prisma — `address` nulo vira `Prisma.DbNull`).
 - **Restauração:** `GET /patients/removed` lista os removidos e `POST /patients/:id/restore` desfaz o soft delete (dados e anamnese voltam intactos). Ambos exigem `patients:write`.
+- **Telefone normalizado (`phoneE164`):** o `phone` continua texto livre, como foi digitado; a API calcula junto o número em formato internacional (`+5561988887777`), que é como uma mensagem de WhatsApp que chega vai ser ligada ao paciente. Regra (`src/patients/phone.ts`): com `+` na frente, o número internacional como veio (8 a 15 dígitos); sem `+`, número brasileiro (tira um `0` de discagem; 10 ou 11 dígitos ganham o `+55`; 12 ou 13 começando com `55` já têm o código do país). O que não se encaixa fica `null`. Só leitura: enviar `phoneE164` dá `400`. A migration preencheu os pacientes que já existiam com a mesma regra.
+- **Consentimento para comunicação** (pré-requisito do lembrete e das campanhas por WhatsApp, decisão 08): `PUT /patients/:id/consents` (`patients:write`) com `{ whatsapp?: boolean, marketing?: boolean }` (envio parcial; sem nenhum, `400`). `whatsapp` = aceita mensagens da clínica sobre o atendimento (lembrete, confirmação); `marketing` = aceita campanhas. Responde o estado atual dos dois, que também vem em `consents` no `GET /patients/:id`: `{ granted, updatedAt, source }` por finalidade (`granted: false` e `updatedAt: null` quando nunca registrado; sem registro = sem consentimento). Cada mudança vira uma linha no histórico (`PatientConsent`, nunca sobrescrito: é a prova para a LGPD), com quem registrou e a origem (`staff` = a equipe; `patient` = o próprio paciente, que virá com o "SAIR" do WhatsApp). Repetir o mesmo valor não grava nada. A mudança entra na trilha de auditoria (`patient.consent_update`, com de → para) e o histórico sai nas duas exportações.
 
 ### Listagem, busca e paginação
 
@@ -250,7 +253,7 @@ Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" 
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
 - `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
 - `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions, sessionId }` no handler.
-- `GET /auth/me` devolve isso (sem o `sessionId`) mais `name`, `email` e `role: { id, name }` (para o cabeçalho do app, sem depender do que o cliente guardou no login).
+- `GET /auth/me` devolve isso (sem o `sessionId`) mais `name`, `email`, `role: { id, name }` e `timezone` (fuso da clínica, para mostrar horários e "hoje" como a clínica vê; só o admin lê `GET /tenants/:id`) — para o cabeçalho do app, sem depender do que o cliente guardou no login.
 - Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` e `PATCH /auth/me/password` contra força bruta.
 - **Bloqueio por conta:** 10 senhas erradas em 15 minutos bloqueiam a conta por 15 minutos (`LoginAttemptsService`), contra o ataque espalhado por muitos IPs, que o limite por IP não pega. Durante o bloqueio, nem a senha certa entra, e a resposta é a mesma `401` "Credenciais inválidas". O contador é pelo hash do email digitado, exista a conta ou não, então ele não revela quais emails existem. O bloqueio de uma conta existente entra na trilha de auditoria da clínica (`auth.login_locked`). Quem foi bloqueado por terceiros pode redefinir a senha pelo email, o que também tira o bloqueio.
 - `helmet` aplica cabeçalhos de segurança padrão (CSP, HSTS, etc.) em todas as respostas.
@@ -357,6 +360,19 @@ A clínica precisa conseguir **sair levando os dados** e pedir que a plataforma 
 
 **A plataforma não apaga dados de clínica por conta própria** (só a pedido dela). A guarda de prontuário depois da saída passa a ser da clínica, com o arquivo exportado — vale um advogado confirmar prazos e redação dos Termos sobre isso.
 
+## Fuso horário da clínica
+
+`Tenant.timezone`: nome IANA (ex.: `America/Sao_Paulo`, `America/Manaus`, `America/Noronha`), padrão `America/Sao_Paulo`. Editável no cadastro e em `PATCH /tenants/:id` (`tenant:manage`); a API aceita qualquer caixa e grava o nome canônico (`america/manaus` → `America/Manaus`). Deslocamento fixo (`-03:00`, `GMT-3`) é recusado de propósito: não acompanha horário de verão. As datas continuam em UTC no banco; o fuso diz o que é "hoje" para a clínica (atraso de cobrança) e vai dizer "amanhã às 9h" (lembretes, horários de atendimento). Vem em `GET /auth/me` para todo usuário.
+
+## Fila e tarefas agendadas (`src/jobs`)
+
+Fila e agendador no próprio Postgres, com o [pg-boss](https://github.com/timgit/pg-boss) (decisão 08): nenhum serviço novo para hospedar.
+
+- **Schema próprio (`pgboss`):** as tabelas da fila não se misturam com as do Prisma, e o `prisma migrate` não as enxerga. O pg-boss cria e migra o schema sozinho ao subir, com trava no banco (várias réplicas subindo juntas não disputam). O usuário do banco precisa poder criar schema.
+- **`JobQueue` plugável**, como o `EmailSender`: os módulos registram os jobs (nome, handler, cron opcional com fuso) no `onModuleInit`, e a fila liga tudo ao subir. Agendamento por cron é um upsert: cada réplica pode registrar sem duplicar. Job que lança erro é tentado de novo (3 vezes por padrão). No `docker stop`, espera os jobs em andamento (até 30 s).
+- **Hoje:** `maintenance.cleanup`, todo dia às 3h de Brasília, apaga sessões vencidas há mais de um dia e contadores de login parados (o login já limpa o que encontra; a faxina cobre quem nunca mais loga). Os próximos são os lembretes de consulta (decisão 08, fase 1).
+- **Testes:** os e2e usam o dublê `FakeJobQueue` (roda o job na hora, sem worker); `jobs.e2e-spec.ts` sobe o pg-boss de verdade.
+
 ## Configurações de tela (`src/configs`)
 
 Configurações de tela da clínica, uma por clínica, iguais para a equipe toda. Hoje: o **layout da tela inicial** (quais blocos aparecem, em que ordem e com que largura). O catálogo de blocos é do front; a API só guarda e devolve a lista, validando a forma.
@@ -398,7 +414,7 @@ Cobrança e pagamento nativos — nada disto depende de serviço externo. **Emis
 - Ligada a um paciente e, opcionalmente, a um agendamento **do mesmo paciente**.
 - `amountCents`: valor em centavos (R$ 150,00 = `15000`) — evita ponto flutuante e `Decimal` na camada de aplicação, mesma convenção de APIs de pagamento (ex.: Stripe).
 - `status`: `pending` → `paid` (só como consequência de pagamento suficiente, nunca por `PATCH` direto) ou `pending` → `cancelled` (`DELETE`, mesma convenção da agenda: cancela, não apaga). `paid` e `cancelled` são finais.
-- **"Atrasada" não é status, é calculado:** `isOverdue` na resposta e o filtro `status=overdue` (mutuamente exclusivo com `status=pending` — uma cobrança pendente cai em exatamente um dos dois) comparam `dueDate` com hoje, sem precisar de job agendado.
+- **"Atrasada" não é status, é calculado:** `isOverdue` na resposta e o filtro `status=overdue` (mutuamente exclusivo com `status=pending` — uma cobrança pendente cai em exatamente um dos dois) comparam `dueDate` com o **hoje no fuso da clínica** (`Tenant.timezone`: às 22h de 10/10 em Brasília já é 11/10 em UTC, e uma cobrança vencendo em 10/10 apareceria atrasada antes da hora), sem precisar de job agendado.
 - Uma cobrança com **qualquer** pagamento registrado (mesmo parcial) não pode mais ser editada nem cancelada — só ler.
 - Listagem paginada com filtros `patientId`, `status` (`pending`/`overdue`/`paid`/`cancelled`) e `from`/`to` (janela de vencimento).
 - Toda resposta traz `patient: { id, fullName }`, `paidCents` (soma dos pagamentos; na listagem, um `groupBy` só para a página inteira) e `balanceCents` (saldo devedor; `0` se cancelada). Pagamentos trazem `recordedBy: { id, name }`.
@@ -415,8 +431,8 @@ Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e 
 |---|---|
 | `checks` | `npm run lint` (oxlint type-aware) + `npm run typecheck` (`tsc --noEmit`) + auditoria das dependências de produção (`audit-ci`: falha em vulnerabilidade alta ou crítica; as exceções conhecidas, todas do CLI do Prisma, ficam explicadas em `audit-ci.jsonc`) |
 | `secrets` | Varredura de segredos no histórico inteiro do git (gitleaks): nenhum `.env`, chave ou senha real pode entrar no repositório |
-| `unit` | `npm test` (99 testes, sem banco) |
-| `e2e` | `npm run test:e2e` (535 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
+| `unit` | `npm test` (116 testes, sem banco) |
+| `e2e` | `npm run test:e2e` (560 testes) contra um Postgres de serviço do próprio Actions; `prisma migrate deploy` (não `migrate dev`: é o comando de produção, não interativo) + `prisma db seed` antes |
 | `docker-smoke` | Sobe a stack real via `docker compose --profile app up -d --build` (a mesma imagem e o mesmo `migrate deploy`/seed automáticos do deploy) e roda a coleção do Postman contra ela por HTTP de verdade (`docs/api/`, via `newman`) — único job que exercita o bootstrap completo (helmet, CORS, rate limit real, recusa de segredo fraco em produção) e a imagem Docker em si. Gera um `JWT_SECRET` aleatório, já que a imagem recusa o de exemplo |
 
 `newman` roda via `npx --yes newman@<versão fixa>` só dentro do job, e não é dependência do projeto: o `Dockerfile` mantém o `node_modules` completo em produção (`prisma`/`tsx` do `migrate deploy`+seed no container), e `newman` sozinho traz ~120 pacotes transitivos e dezenas de vulnerabilidades reportadas — sem necessidade, isso vazaria para a imagem publicada.
@@ -425,12 +441,12 @@ Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e 
 
 Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
 
-- `bem-te-vi.postman_collection.json` — 10 pastas, 95 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca (inclui configurações de tela), papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
+- `bem-te-vi.postman_collection.json` — 10 pastas, 96 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca (inclui configurações de tela), papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
 - `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
 
 **Como usar:** suba a API, importe os dois arquivos (o Postman guarda o cookie de sessão sozinho e o reenvia no refresh e no logout), selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
 
-**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 95 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 96 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
 
 **Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
 
@@ -470,5 +486,8 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `legal.e2e-spec.ts` — aceite de Termos/Política: versões públicas, obrigatório no cadastro e no aceite de convite (versão errada dá 400 e nada é criado; o link do convite não é gasto), registro com IP/navegador, pendências em `/auth/me` para quem foi criado com senha, e versão nova publicada (pendência só do documento que mudou, histórico preservado).
   - `patient-export.e2e-spec.ts` — exportação do paciente: anexo JSON com cadastro, fichas com rótulos (na ordem do formulário, campo removido do formulário com `label: null`), agenda e cobranças com pagamentos; auditada; paciente removido também exporta; permissão `patients:export` e isolamento.
   - `tenant-closure.e2e-spec.ts` — saída da clínica: exportação completa sem nenhum segredo (logo em base64, convites pendentes não vazam token) e com as duas permissões exigidas; pedido de encerramento com senha, carência de 30 dias, emails para quem pediu e para a plataforma, cancelamento e auditoria; exclusão pela plataforma só com pedido, depois da carência e confirmando o subdomínio, apagando tudo e deixando a prova em `TenantDeletion`.
+  - `timezone.e2e-spec.ts` — fuso da clínica: padrão, nome canônico, recusa de deslocamento fixo e de nome inválido (mensagem em português), no cadastro e no PATCH, em `/auth/me`, e o atraso de cobrança pelo "hoje" do fuso (dois fusos com mais de 24 h de diferença).
+  - `patient-contact.e2e-spec.ts` — telefone normalizado (cadastro, edição, limpeza, número não reconhecível, só leitura) e o SQL da migration concordando com `normalizePhone`; consentimento (padrão "não", envio parcial, histórico sem duplicar, auditoria com de → para, validação, permissão, removido, isolamento, exportações).
+  - `jobs.e2e-spec.ts` — faxina diária (agendamento e o que apaga e o que mantém) e o pg-boss de verdade (fila criada, agendamento gravado, job executado).
   - `configs.e2e-spec.ts` — configurações de tela: nada salvo (`home: null`), salvar com `updatedAt`/`updatedBy`, leitura por qualquer usuário e escrita só com `tenant:manage`, substituição e lista vazia, tipo de bloco desconhecido aceito, tela desconhecida (404), validação (largura, id repetido, mais de 24, versão, formato, campo extra), voltar ao padrão (idempotente) e isolamento.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

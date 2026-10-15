@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { PatientsService } from './patients.service.js';
 import { PatientExportService } from './patient-export.service.js';
@@ -6,6 +6,7 @@ import { CreatePatientDto } from './dto/create-patient.dto.js';
 import { UpdatePatientDto } from './dto/update-patient.dto.js';
 import { CreateAnamnesisRecordDto } from './dto/create-anamnesis-record.dto.js';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto.js';
+import { UpdatePatientConsentsDto } from './dto/update-patient-consents.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
@@ -57,6 +58,18 @@ export class PatientsController {
     @Param('id') id: string,
   ) {
     return this.patientsService.findOne(tenantId, actor, id);
+  }
+
+  // Consentimento para WhatsApp e marketing (envio parcial). Responde o estado atual dos dois.
+  @RequirePermissions('patients:write')
+  @Put(':id/consents')
+  updateConsents(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePatientConsentsDto,
+  ) {
+    return this.patientsService.updateConsents(tenantId, actor, id, dto);
   }
 
   @RequirePermissions('patients:write')

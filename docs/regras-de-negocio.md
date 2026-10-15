@@ -17,6 +17,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 - `subdomain` é único e precisa ser um rótulo DNS válido: `a-z`, `0-9` e `-`, sem hífen no começo nem no fim. **Subdomínios da plataforma são reservados** (`www`, `api`, `app`, `admin`, `backoffice`, `mail`... e os de `RESERVED_SUBDOMAINS`): `409` "Este subdomínio não está disponível", no cadastro e na troca. O **email é único em toda a plataforma**: a mesma pessoa não pode ter conta em duas clínicas com o mesmo email.
 - Nome da clínica e do responsável são obrigatórios, sem aceitar vazio nem só espaços. A senha do responsável tem de 8 a 200 caracteres. O cadastro vai para a landing page (outro projeto), então a API valida tudo sozinha.
 - **Domínio próprio** não pode ser o domínio da plataforma nem um subdomínio dele (`409` "Este domínio não está disponível").
+- **Fuso horário** (IANA, padrão `America/Sao_Paulo`): diz o que é "hoje" para a clínica. Deslocamento fixo (`-03:00`) não é aceito.
 - **Duração de atendimento:** padrão (30 min) e mínima (5 min) por clínica. A padrão não pode ser menor que a mínima, e a mínima não pode ficar acima da duração própria de algum profissional.
 - **Suspensão** é ação da plataforma, nunca da própria clínica. Clínica suspensa: ninguém loga, sessões abertas caem e a marca pública responde `404`.
 
@@ -78,6 +79,8 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 - **Remoção é soft delete:** some das leituras, mas fica no banco com as fichas. Pode ser restaurado. Paciente removido não recebe agendamento nem cobrança novos.
 - **Busca** (`q`): todas as palavras precisam casar. Palavra com letras busca no nome (sem diferenciar maiúsculas nem acentos); palavra só com dígitos e pontuação busca no CPF ou no telefone (parcial, comparando só os dígitos: `(61) 98888-7777` acha `61988887777`).
 - `null` no `PATCH` limpa o campo.
+- **Telefone:** guardado como foi digitado; a API calcula o número internacional (`phoneE164`, ex.: `+5561988887777`) para ligar mensagens de WhatsApp ao paciente. Sem `+`, o número é tratado como brasileiro.
+- **Consentimento para comunicação:** WhatsApp (mensagens sobre o atendimento: lembrete, confirmação) e marketing (campanhas), registrados pela equipe. Sem registro = não. Cada mudança fica no histórico, com quem registrou, e entra na trilha de auditoria; o histórico sai nas exportações. Nenhuma mensagem automática vai para quem não consentiu.
 
 ## Anamnese
 
@@ -106,7 +109,7 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 ## Financeiro
 
 - **Cobrança** de um paciente, com agendamento opcional, que precisa ser do mesmo paciente. Valor em centavos.
-- **Status:** `pending` → `paid` (só por pagamento suficiente, nunca à mão) ou `cancelled`. "Atrasada" é calculado: pendente com vencimento antes de hoje (em UTC).
+- **Status:** `pending` → `paid` (só por pagamento suficiente, nunca à mão) ou `cancelled`. "Atrasada" é calculado: pendente com vencimento antes de hoje, no fuso da clínica.
 - Cobrança com **qualquer** pagamento registrado não pode mais ser editada nem cancelada.
 - **Pagamentos** parciais ou totais: a soma nunca passa do valor (`400` com o saldo). Completar o valor marca a cobrança como paga.
 - **Resumo:** pendente, atrasado e cancelado são o estado atual; pago é por período, pela data do pagamento.

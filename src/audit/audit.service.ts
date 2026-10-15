@@ -17,6 +17,8 @@ export const AUDIT_ACTIONS = [
   'patient.update',
   'patient.delete',
   'patient.restore',
+  // Mudança de consentimento (WhatsApp, marketing): details.changes com de → para.
+  'patient.consent_update',
   'clinical_record.list',
   'clinical_record.create',
   // Exportação de dados (direito de acesso/portabilidade do titular; saída da clínica).

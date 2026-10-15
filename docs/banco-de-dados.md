@@ -37,6 +37,8 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 
 ### Clínica e acesso
 
+`Tenant.timezone` guarda o fuso IANA da clínica (padrão `America/Sao_Paulo`).
+
 | Modelo (tabela) | Para que serve | Pontos importantes |
 |---|---|---|
 | `Tenant` (`tenants`) | A clínica | `subdomain` único; `customDomain` único, com token e data de verificação DNS; `status` (`active`/`suspended`); `isPlatform` (a clínica que hospeda o painel da plataforma); durações padrão e mínima de atendimento; `closureRequestedAt` (pedido de encerramento) |
@@ -58,7 +60,8 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 
 | Modelo | Para que serve | Pontos importantes |
 |---|---|---|
-| `Patient` (`patients`) | Cadastro do paciente | `@@unique([tenantId, cpf])`, **inclusive entre removidos**; `deletedAt` (soft delete); `address` em JSON livre |
+| `Patient` (`patients`) | Cadastro do paciente | `@@unique([tenantId, cpf])`, **inclusive entre removidos**; `deletedAt` (soft delete); `address` em JSON livre; `phoneE164` calculado pela API a partir de `phone` (índice por clínica + telefone) |
+| `PatientConsent` (`patient_consents`) | Consentimento para WhatsApp e marketing | Histórico: uma linha por mudança (`granted`, `source`, quem registrou), nunca sobrescrita; estado atual = a mais recente por finalidade. Cascata com o paciente |
 | `AnamnesisTemplate` (`anamnesis_templates`) | Formulário de anamnese configurado pela clínica | Nome único por clínica; `fields` em JSON (chave, rótulo, tipo, obrigatório, opções), validado na escrita |
 | `AnamnesisRecord` (`anamnesis_records`) | Ficha preenchida | **Imutável** (não há rota de edição); `answers` validado contra o formulário no momento do registro; FK `Restrict` para o formulário e para quem preencheu |
 
@@ -92,6 +95,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 - **Trigger de imutabilidade** da auditoria (migration `audit_log`).
 - **Advisory locks** (`pg_advisory_xact_lock(hashtext(...))`) em transações: agenda (por profissional), pagamento (por cobrança) e administradores (por clínica).
 - **SQL parametrizado** (`$queryRaw`) na busca de pacientes e de clínicas, só para achar os ids da página.
+- **Schema `pgboss`:** fila e agendador (pg-boss), criado e migrado pelo próprio pg-boss ao subir, fora do controle do Prisma.
 - **`INSERT ... ON CONFLICT DO UPDATE`** no contador de senhas erradas (`LoginAttemptsService`): o incremento é atômico, então tentativas simultâneas não se perdem.
 
 ## Migrations (em ordem)
@@ -114,6 +118,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `tenant_closure` | `closure_requested_at` na clínica e `tenant_deletions` |
 | `sessions_and_login_attempts` | `sessions`, `refresh_tokens` e `login_attempts` (refresh token e bloqueio por tentativas) |
 | `appointments_attend_permission` | Permissão `appointments:attend`, dada ao papel Admin do cadastro (todo o catálogo, exceto `platform:*`) e a todo papel com usuário que já foi profissional de algum agendamento |
+| `phase0_timezone_phone_consents` | `tenants.timezone`, `patients.phone_e164` (preenchido para os pacientes existentes, com a mesma regra de `normalizePhone`) e `patient_consents` |
 | `tenant_configs` | `tenant_configs` (configurações de tela da clínica) |
 | `session_password_version` | `sessions.password_version` (o refresh recusa sessão aberta antes de uma troca de senha) |
 

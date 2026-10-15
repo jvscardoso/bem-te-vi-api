@@ -4,6 +4,8 @@
 
 ## Situação atual
 
+> **Atualização (14/10/2026):** o fuso da clínica (`Tenant.timezone`), pré-requisito desta decisão, já existe (fase 0 da decisão 08). Falta decidir a grade.
+
 - Não existe grade de disponibilidade: dá para agendar **qualquer dia, a qualquer hora**, inclusive às 3h da manhã de um domingo.
 - A API só garante duas coisas: o mesmo profissional não tem dois agendamentos sobrepostos, e a duração respeita o mínimo da clínica.
 - **Não existe fuso horário da clínica.** Tudo é UTC, e o front converte. Para "atende das 8h às 18h" ou "fechado no feriado", a API precisa saber o fuso da clínica (Brasil tem mais de um: `America/Sao_Paulo`, `America/Manaus`, `America/Noronha`...).

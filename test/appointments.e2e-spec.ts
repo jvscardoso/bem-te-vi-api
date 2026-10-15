@@ -573,6 +573,8 @@ describe('Agenda de consultas (e2e)', () => {
       }
     });
 
+    // Cria 4 profissionais (4 hashes e 4 logins em bcrypt de custo 12): com a suíte inteira em
+    // paralelo disputando CPU, passa do tempo padrão de um teste.
     it('profissionais diferentes no mesmo horário não se bloqueiam', async () => {
       const profs = await Promise.all([1, 2, 3, 4].map((n) => professional(`prof-par-${n}`)));
       const results = await Promise.all(
@@ -582,7 +584,7 @@ describe('Agenda de consultas (e2e)', () => {
       );
 
       expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201]);
-    });
+    }, 60_000);
 
     it('duas remarcações simultâneas para o mesmo horário: só uma vence', async () => {
       const prof = await professional('prof-race-move');

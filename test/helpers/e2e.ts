@@ -10,6 +10,7 @@ import { configureApp } from '../../src/app-setup.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { DnsTxtResolver } from '../../src/tenants/dns-txt-resolver.js';
 import { EmailSender, type EmailMessage } from '../../src/mail/email-sender.js';
+import { JobQueue } from '../../src/jobs/job-queue.js';
 
 // Dublê de email: guarda as mensagens em vez de enviar. Todo app de teste usa um (nenhum
 // teste fala com SMTP); quem testa email passa o seu e lê `messages`.
@@ -22,6 +23,29 @@ export class FakeEmailSender extends EmailSender {
 
   to(email: string) {
     return this.messages.filter((m) => m.to === email.toLowerCase());
+  }
+}
+
+// Dublê da fila: em vez do pg-boss (que rodaria workers e o agendador em cada app de teste),
+// guarda os jobs registrados e roda o handler na hora. Quem testa um job chama `run(nome)`.
+export class FakeJobQueue extends JobQueue {
+  sent: { name: string; data: object }[] = [];
+
+  async send(name: string, data: object = {}) {
+    this.sent.push({ name, data });
+    await this.run(name, data);
+  }
+
+  async run(name: string, data: object = {}) {
+    const definition = this.definitions.get(name);
+    if (!definition) {
+      throw new Error(`Job ${name} não registrado`);
+    }
+    await definition.handler(data);
+  }
+
+  registered(name: string) {
+    return this.definitions.get(name);
   }
 }
 
@@ -62,7 +86,7 @@ export interface TestTenant extends TestUser {
 // (não dá para apontar um TXT real num domínio de teste); os demais arquivos usam o real,
 // que nunca chega a ser chamado por eles.
 export async function createTestApp(
-  opts: { dnsTxtResolver?: DnsTxtResolver; emailSender?: EmailSender } = {},
+  opts: { dnsTxtResolver?: DnsTxtResolver; emailSender?: EmailSender; jobQueue?: JobQueue | 'real' } = {},
 ): Promise<TestApp> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ThrottlerStorage)
@@ -75,6 +99,10 @@ export async function createTestApp(
       }),
     });
   builder.overrideProvider(EmailSender).useValue(opts.emailSender ?? new FakeEmailSender());
+  // 'real': o pg-boss de verdade (só o teste da própria fila). O padrão é o dublê.
+  if (opts.jobQueue !== 'real') {
+    builder.overrideProvider(JobQueue).useValue(opts.jobQueue ?? new FakeJobQueue());
+  }
   if (opts.dnsTxtResolver) {
     builder.overrideProvider(DnsTxtResolver).useValue(opts.dnsTxtResolver);
   }

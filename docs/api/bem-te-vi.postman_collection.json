@@ -412,10 +412,10 @@
                 "{{tenantId}}"
               ]
             },
-            "description": "Duração padrão do atendimento (45 min), mínimo (15 min) e domínio próprio (validado como domínio e normalizado para minúsculas).",
+            "description": "Duração padrão do atendimento (45 min), mínimo (15 min), domínio próprio (validado como domínio e normalizado para minúsculas) e fuso horário (nome IANA, gravado no nome canônico; padrão America/Sao_Paulo). O fuso define o \"hoje\" da clínica (atraso de cobrança, lembretes).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"defaultAppointmentDurationMinutes\": 45,\n  \"minAppointmentDurationMinutes\": 15,\n  \"customDomain\": \"agenda-{{suffix}}.exemplo.com.br\"\n}",
+              "raw": "{\n  \"defaultAppointmentDurationMinutes\": 45,\n  \"minAppointmentDurationMinutes\": 15,\n  \"customDomain\": \"agenda-{{suffix}}.exemplo.com.br\",\n  \"timezone\": \"america/sao_paulo\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -432,7 +432,8 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('customDomain', b.customDomain);",
-                  "pm.test(\"duração padrão 45\", () => pm.expect(b.defaultAppointmentDurationMinutes === 45).to.be.true);"
+                  "pm.test(\"duração padrão 45\", () => pm.expect(b.defaultAppointmentDurationMinutes === 45).to.be.true);",
+                  "pm.test(\"fuso no nome canônico\", () => pm.expect(b.timezone === 'America/Sao_Paulo').to.be.true);"
                 ]
               }
             }
@@ -1900,7 +1901,8 @@
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('patientId', b.id);",
-                  "pm.test(\"CPF normalizado para dígitos\", () => pm.expect(b.cpf === '12345678901').to.be.true);"
+                  "pm.test(\"CPF normalizado para dígitos\", () => pm.expect(b.cpf === '12345678901').to.be.true);",
+                  "pm.test(\"telefone em formato internacional (E.164), calculado pela API\", () => pm.expect(b.phoneE164 === '+5511912345678').to.be.true);"
                 ]
               }
             }
@@ -2410,6 +2412,49 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.test(\"telefone novo e nome preservado\", () => pm.expect(b.phone === '(11) 98888-7777' && b.fullName === 'Maria da Silva').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar consentimento (WhatsApp)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/patients/{{patientId}}/consents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "patients",
+                "{{patientId}}",
+                "consents"
+              ]
+            },
+            "description": "Consentimento do paciente para receber mensagens da clínica por WhatsApp (lembretes, confirmação) e campanhas de marketing. Envio parcial; cada mudança fica no histórico (prova para a LGPD) e na trilha de auditoria. O detalhe do paciente traz o estado atual em `consents`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"whatsapp\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"WhatsApp sim, marketing não\", () => pm.expect(b.whatsapp.granted === true && b.whatsapp.source === 'staff' && b.marketing.granted === false).to.be.true);"
                 ]
               }
             }

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { ChargeStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { todayIn } from '../common/validation/time-zone.js';
 import { pageOf } from '../common/pagination/page.js';
 import { CreateChargeDto } from './dto/create-charge.dto.js';
 import { UpdateChargeDto } from './dto/update-charge.dto.js';
@@ -48,16 +49,17 @@ export class BillingService {
       },
       include: CHARGE_INCLUDE,
     });
-    return this.withComputed(charge, 0);
+    return this.withComputed(charge, 0, await this.today(tenantId));
   }
 
   async findAllCharges(tenantId: string, query: ListChargesQueryDto) {
     const { patientId, status, from, to, page, pageSize } = query;
+    const today = await this.today(tenantId);
     const where: Prisma.ChargeWhereInput = {
       tenantId,
       patientId,
       dueDate: { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined },
-      ...this.statusFilter(status),
+      ...this.statusFilter(status, today),
     };
 
     const [data, total] = await Promise.all([
@@ -83,7 +85,7 @@ export class BillingService {
     const paidById = new Map(sums.map((row) => [row.chargeId, row._sum.amountCents ?? 0]));
 
     return pageOf(
-      data.map((charge) => this.withComputed(charge, paidById.get(charge.id) ?? 0)),
+      data.map((charge) => this.withComputed(charge, paidById.get(charge.id) ?? 0, today)),
       total,
       page,
       pageSize,
@@ -98,7 +100,7 @@ export class BillingService {
       orderBy: { paidAt: 'desc' },
     });
     const paidCents = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
-    return { ...this.withComputed(charge, paidCents), payments };
+    return { ...this.withComputed(charge, paidCents, await this.today(tenantId)), payments };
   }
 
   async updateCharge(tenantId: string, id: string, dto: UpdateChargeDto) {
@@ -127,7 +129,7 @@ export class BillingService {
       data: { ...dto, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined },
       include: CHARGE_INCLUDE,
     });
-    return this.withComputed(updated, paidCents);
+    return this.withComputed(updated, paidCents, await this.today(tenantId));
   }
 
   // DELETE cancela (não apaga) — mesma convenção da agenda.
@@ -194,14 +196,15 @@ export class BillingService {
   // "Pago no período" olha a data do pagamento; os demais são o total atual (não teria
   // sentido perguntar "quanto estava pendente em janeiro" sem reconstruir o histórico).
   async summary(tenantId: string, { from, to }: BillingSummaryQueryDto) {
+    const today = await this.today(tenantId);
     const [pending, overdue, cancelled, paidInPeriod] = await Promise.all([
       this.prisma.charge.aggregate({
-        where: { tenantId, ...this.statusFilter('pending') },
+        where: { tenantId, ...this.statusFilter('pending', today) },
         _count: true,
         _sum: { amountCents: true },
       }),
       this.prisma.charge.aggregate({
-        where: { tenantId, ...this.statusFilter('overdue') },
+        where: { tenantId, ...this.statusFilter('overdue', today) },
         _count: true,
         _sum: { amountCents: true },
       }),
@@ -260,9 +263,15 @@ export class BillingService {
     }
   }
 
+  // "Hoje" no fuso da clínica: às 22h de 10/10 em Brasília já é 11/10 em UTC, e uma cobrança
+  // vencendo em 10/10 apareceria atrasada antes da hora.
+  private async today(tenantId: string) {
+    const { timezone } = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { timezone: true } });
+    return todayIn(timezone);
+  }
+
   // 'pending' e 'overdue' se excluem: uma cobrança pendente cai em exatamente um dos dois.
-  private statusFilter(status?: ChargeStatusFilter): Prisma.ChargeWhereInput {
-    const today = new Date(new Date().toISOString().slice(0, 10));
+  private statusFilter(status: ChargeStatusFilter | undefined, today: Date): Prisma.ChargeWhereInput {
     switch (status) {
       case 'pending':
         return { status: 'pending', dueDate: { gte: today } };
@@ -277,8 +286,7 @@ export class BillingService {
     }
   }
 
-  private withComputed(charge: ChargeWithPatient, paidCents: number) {
-    const today = new Date(new Date().toISOString().slice(0, 10));
+  private withComputed(charge: ChargeWithPatient, paidCents: number, today: Date) {
     return {
       ...charge,
       isOverdue: charge.status === 'pending' && charge.dueDate < today,

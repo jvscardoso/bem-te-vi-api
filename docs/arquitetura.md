@@ -47,6 +47,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 | `legal` | Versões vigentes de Termos e Política e registro dos aceites |
 | `account` | Tokens de uso único (recuperação de senha, convite) e montagem dos emails de conta |
 | `mail` | `EmailSender` plugável; implementação SMTP |
+| `jobs` | `JobQueue` plugável (fila e agendador, pg-boss no Postgres) e a faxina diária |
 | `configs` | Configurações de tela da clínica (`/configs`): hoje, o layout da tela inicial |
 | `platform` | Painel da plataforma: listar, suspender e excluir clínicas |
 | `prisma` | `PrismaService` (pool `pg` com keepalive) |
@@ -82,7 +83,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
   - **agenda:** por profissional, para impedir dois agendamentos sobrepostos;
   - **pagamentos:** por cobrança, para a soma nunca passar do valor;
   - **papéis e usuários:** por clínica, para a clínica nunca ficar sem administrador.
-- **Peças plugáveis para o que é externo:** `DnsTxtResolver` (verificação de domínio) e `EmailSender` (SMTP). Nos testes, os dois são trocados por dublês.
+- **Peças plugáveis para o que é externo:** `DnsTxtResolver` (verificação de domínio), `EmailSender` (SMTP) e `JobQueue` (pg-boss). Nos testes, os três são trocados por dublês (o pg-boss de verdade só em `jobs.e2e-spec.ts`).
 - **Trabalho em segundo plano sem fila:** emails de recuperação, convite e encerramento são disparados sem esperar o SMTP. A falha fica no log. No "esqueci minha senha", isso também evita que o tempo de resposta revele se o email existe.
 - **Auditoria síncrona e transacional:** nas escritas, o registro entra na mesma transação da alteração. Se a auditoria falhar, a requisição falha.
 - **Tokens de uso único só como hash** (SHA-256) no banco, consumidos com `UPDATE` condicional, o que impede dois usos simultâneos do mesmo link.
@@ -111,6 +112,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 
 - **Docker:** imagem multi-stage (`node:24-bookworm-slim`), usuário não-root, `HEALTHCHECK` em `GET /`, shutdown gracioso. Na subida, roda `prisma migrate deploy` e o seed (idempotente).
 - **docker-compose:** `db` (Postgres 15) e `mailpit` sempre; `api` só com `--profile app`.
+- **Fila e agendador:** pg-boss, no schema `pgboss` do mesmo banco. Sem serviço novo; várias réplicas da API dividem os jobs sem duplicar.
 - **CI** (`.github/workflows/ci.yml`): `checks` (lint type-aware + typecheck + auditoria de dependências), `secrets` (gitleaks), `unit`, `e2e` (Postgres de serviço) e `docker-smoke` (sobe a stack real e roda a coleção do Postman com newman).
 - **Configuração:** só variáveis de ambiente. A lista comentada está em `.env.example`.
 

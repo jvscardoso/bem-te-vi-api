@@ -8,6 +8,7 @@ API de um SaaS whitelabel de gestão de clínicas (NestJS 12 + Prisma 7 + Postgr
 - banco → [`docs/banco-de-dados.md`](docs/banco-de-dados.md)
 - contrato das rotas → `README.md`
 - decisões de produto ainda sem resposta → `docs/decisoes/` (não implemente nada delas sem confirmar)
+- funcionalidades já decididas, sem data → `docs/roadmap/` (vira task em `docs/changes/` quando entrar em desenvolvimento)
 - pedidos do front para a API → `docs/changes/` (fora do git; índice em `docs/changes/00-indice.md`)
 
 ## Comandos
@@ -30,12 +31,12 @@ npx --yes newman@6.2.2 run docs/api/bem-te-vi.postman_collection.json -e docs/ap
 
 ## Arquitetura em resumo
 
-- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs` e `platform`. Banco via `PrismaService`.
+- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs` e `platform`. Banco via `PrismaService`.
 - Rotas de negócio aninhadas em `/tenants/:tenantId/...`. Rotas públicas usam `@Public()`.
 - Guards globais, nesta ordem: Throttler → JwtAuth → TenantAccess (o `:tenantId` da URL precisa ser o do token) → Permissions (`@RequirePermissions(...)`, com E lógico entre as permissões).
 - O JWT só prova identidade: o `JwtStrategy` relê usuário, clínica e permissões **a cada requisição**. `passwordVersion` no token derruba as sessões na troca de senha.
 - `ValidationPipe` com `whitelist` + `forbidNonWhitelisted`: campo extra → `400`. `PrismaExceptionFilter` mapeia unique/FK para `409` e registro não encontrado para `404`.
-- Peças externas são plugáveis e trocadas por dublês nos testes: `DnsTxtResolver` e `EmailSender`.
+- Peças externas são plugáveis e trocadas por dublês nos testes: `DnsTxtResolver`, `EmailSender` e `JobQueue` (pg-boss; os e2e usam `FakeJobQueue`).
 
 ## Invariantes — não quebre
 

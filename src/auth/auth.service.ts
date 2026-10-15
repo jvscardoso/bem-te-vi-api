@@ -262,11 +262,25 @@ export class AuthService {
     const [user, pendingLegalDocuments] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: actor.userId },
-        select: { name: true, email: true, role: { select: { id: true, name: true } } },
+        select: {
+          name: true,
+          email: true,
+          role: { select: { id: true, name: true } },
+          tenant: { select: { timezone: true } },
+        },
       }),
       this.legal.pending(actor.userId),
     ]);
-    return { ...actor, name: user.name, email: user.email, role: user.role, pendingLegalDocuments };
+    // timezone: fuso da clínica, para o front mostrar horários e "hoje" como a clínica vê (só o
+    // admin lê GET /tenants/:id, e todo usuário precisa disso).
+    return {
+      ...actor,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      timezone: user.tenant.timezone,
+      pendingLegalDocuments,
+    };
   }
 
   async acceptLegal(actor: AuthenticatedUser, dto: LegalAcceptanceDto) {

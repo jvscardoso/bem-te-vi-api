@@ -191,13 +191,20 @@ const clinica = folder(
     }),
     req('Atualizar configurações e domínio próprio', 'PATCH', '/tenants/{{tenantId}}', {
       description:
-        'Duração padrão do atendimento (45 min), mínimo (15 min) e domínio próprio (validado como domínio e normalizado para minúsculas).',
+        'Duração padrão do atendimento (45 min), mínimo (15 min), domínio próprio (validado como domínio e normalizado para minúsculas) e fuso horário (nome IANA, gravado no nome canônico; padrão America/Sao_Paulo). O fuso define o "hoje" da clínica (atraso de cobrança, lembretes).',
       body: {
         defaultAppointmentDurationMinutes: 45,
         minAppointmentDurationMinutes: 15,
         customDomain: 'agenda-{{suffix}}.exemplo.com.br',
+        timezone: 'america/sao_paulo',
       },
-      test: [status(200), json, set('customDomain', 'b.customDomain'), check('duração padrão 45', 'b.defaultAppointmentDurationMinutes === 45')],
+      test: [
+        status(200),
+        json,
+        set('customDomain', 'b.customDomain'),
+        check('duração padrão 45', 'b.defaultAppointmentDurationMinutes === 45'),
+        check('fuso no nome canônico', "b.timezone === 'America/Sao_Paulo'"),
+      ],
     }),
     req('Tentar suspender a própria clínica', 'PATCH', '/tenants/{{tenantId}}', {
       description: 'Suspensão é ação da plataforma: o campo `status` não é aceito para o admin da clínica.',
@@ -465,7 +472,13 @@ const pacientes = folder(
         address: { rua: 'Rua das Flores', numero: 10, cidade: 'São Paulo' },
         notes: 'Prefere atendimento à tarde',
       },
-      test: [status(201), json, set('patientId', 'b.id'), check('CPF normalizado para dígitos', "b.cpf === '12345678901'")],
+      test: [
+        status(201),
+        json,
+        set('patientId', 'b.id'),
+        check('CPF normalizado para dígitos', "b.cpf === '12345678901'"),
+        check('telefone em formato internacional (E.164), calculado pela API', "b.phoneE164 === '+5511912345678'"),
+      ],
     }),
     req('Criar paciente (João)', 'POST', '/tenants/{{tenantId}}/patients', {
       body: { fullName: 'João Pedro Souza', cpf: '987.654.321-00' },
@@ -529,6 +542,12 @@ const pacientes = folder(
     req('Atualizar paciente', 'PATCH', '/tenants/{{tenantId}}/patients/{{patientId}}', {
       body: { phone: '(11) 98888-7777' },
       test: [status(200), json, check('telefone novo e nome preservado', "b.phone === '(11) 98888-7777' && b.fullName === 'Maria da Silva'")],
+    }),
+    req('Registrar consentimento (WhatsApp)', 'PUT', '/tenants/{{tenantId}}/patients/{{patientId}}/consents', {
+      description:
+        'Consentimento do paciente para receber mensagens da clínica por WhatsApp (lembretes, confirmação) e campanhas de marketing. Envio parcial; cada mudança fica no histórico (prova para a LGPD) e na trilha de auditoria. O detalhe do paciente traz o estado atual em `consents`.',
+      body: { whatsapp: true },
+      test: [status(200), json, check('WhatsApp sim, marketing não', "b.whatsapp.granted === true && b.whatsapp.source === 'staff' && b.marketing.granted === false")],
     }),
     req('Criar formulário de anamnese', 'POST', '/tenants/{{tenantId}}/anamnesis-templates', {
       description: 'Cada clínica define os campos da ficha (chave, rótulo, tipo, obrigatório, opções). As respostas são validadas contra ele.',
