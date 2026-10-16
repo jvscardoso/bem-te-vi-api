@@ -31,12 +31,12 @@ npx --yes newman@6.2.2 run docs/api/bem-te-vi.postman_collection.json -e docs/ap
 
 ## Arquitetura em resumo
 
-- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs` e `platform`. Banco via `PrismaService`.
+- Um módulo Nest por domínio em `src/`: `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs`, `subscriptions` e `platform`. Banco via `PrismaService`.
 - Rotas de negócio aninhadas em `/tenants/:tenantId/...`. Rotas públicas usam `@Public()`.
-- Guards globais, nesta ordem: Throttler → JwtAuth → TenantAccess (o `:tenantId` da URL precisa ser o do token) → Permissions (`@RequirePermissions(...)`, com E lógico entre as permissões).
+- Guards globais, nesta ordem: Throttler → JwtAuth → TenantAccess (o `:tenantId` da URL precisa ser o do token) → Permissions (`@RequirePermissions(...)`, com E lógico entre as permissões) → SubscriptionAccess (assinatura vencida: só leitura ou bloqueio, `402`; rota que precisa funcionar assim mesmo leva `@SubscriptionExempt()`).
 - O JWT só prova identidade: o `JwtStrategy` relê usuário, clínica e permissões **a cada requisição**. `passwordVersion` no token derruba as sessões na troca de senha.
 - `ValidationPipe` com `whitelist` + `forbidNonWhitelisted`: campo extra → `400`. `PrismaExceptionFilter` mapeia unique/FK para `409` e registro não encontrado para `404`.
-- Peças externas são plugáveis e trocadas por dublês nos testes: `DnsTxtResolver`, `EmailSender` e `JobQueue` (pg-boss; os e2e usam `FakeJobQueue`).
+- Peças externas são plugáveis e trocadas por dublês nos testes: `DnsTxtResolver`, `EmailSender`, `JobQueue` (pg-boss; os e2e usam `FakeJobQueue`) e `PaymentGateway` (Asaas; os e2e usam `FakePaymentGateway`).
 
 ## Invariantes — não quebre
 

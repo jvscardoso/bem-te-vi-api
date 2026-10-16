@@ -15,7 +15,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 ┌────────────────────────────────▼────────────────────────────────┐
 │ NestJS (Express)                                                │
 │  helmet → CORS → middlewares (RequestContext, RequestLogger)    │
-│  guards globais: Throttler → JwtAuth → TenantAccess → Permissions│
+│  guards: Throttler → JwtAuth → TenantAccess → Permissions → Assinatura│
 │  ValidationPipe (whitelist + forbidNonWhitelisted)              │
 │  módulos de domínio → serviços → Prisma                         │
 └───────┬───────────────────────────────┬─────────────────────────┘
@@ -48,11 +48,12 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
 | `account` | Tokens de uso único (recuperação de senha, convite) e montagem dos emails de conta |
 | `mail` | `EmailSender` plugável; implementação SMTP |
 | `jobs` | `JobQueue` plugável (fila e agendador, pg-boss no Postgres) e a faxina diária |
+| `subscriptions` | Assinatura da clínica (mensalidade): planos, teste grátis, contratação no Asaas (`PaymentGateway` plugável), webhook e o `SubscriptionAccessGuard` (só leitura/bloqueio) |
 | `configs` | Configurações de tela da clínica (`/configs`): hoje, o layout da tela inicial |
 | `platform` | Painel da plataforma: listar, suspender e excluir clínicas |
 | `prisma` | `PrismaService` (pool `pg` com keepalive) |
 | `common` | Paginação, filtro de erros do Prisma, validação (`ValidationPipe` com erros em português, `@RequiredText`), middlewares, `RequestContext`, utilitários |
-| `config` | `validateEnv`: em produção, recusa subir com segredo fraco |
+| `config` | `validateEnv`: em produção, recusa subir com segredo fraco ou com a configuração do Asaas inconsistente |
 
 ## Pipeline de uma requisição
 
@@ -64,6 +65,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
    2. `JwtAuthGuard`: toda rota exige JWT de uma sessão aberta, exceto as marcadas com `@Public()`.
    3. `TenantAccessGuard`: o `:tenantId` da URL precisa ser o do token (`403`). É o que isola as clínicas.
    4. `PermissionsGuard`: `@RequirePermissions(...)`. Todas as listadas são obrigatórias (E lógico).
+   5. `SubscriptionAccessGuard`: assinatura da clínica em "só leitura" deixa só `GET`/`HEAD`; bloqueada, nada. Responde `402` com `code`. Rotas com `@SubscriptionExempt()` (sessão, assinatura, exportações, encerramento) passam sempre. Os prazos vêm na mesma consulta do `JwtStrategy`, sem ida extra ao banco.
 5. **`ValidationPipe`** (`APP_PIPE`, então vale igual nos testes) com `whitelist` + `forbidNonWhitelisted`: campo desconhecido → `400`. O `exceptionFactory` devolve `message` em português e `errors: [{ field, code, message }]`, uma entrada por campo (ver README, "Erros de validação").
 6. **Controller → Service → Prisma.**
 7. **`PrismaExceptionFilter`** traduz violação de unique em `409` (mensagem por índice), FK em `409` e registro não encontrado em `404`, em vez de `500`.
@@ -83,7 +85,7 @@ Visão de como a API é organizada e por quê. As regras de negócio estão em [
   - **agenda:** por profissional, para impedir dois agendamentos sobrepostos;
   - **pagamentos:** por cobrança, para a soma nunca passar do valor;
   - **papéis e usuários:** por clínica, para a clínica nunca ficar sem administrador.
-- **Peças plugáveis para o que é externo:** `DnsTxtResolver` (verificação de domínio), `EmailSender` (SMTP) e `JobQueue` (pg-boss). Nos testes, os três são trocados por dublês (o pg-boss de verdade só em `jobs.e2e-spec.ts`).
+- **Peças plugáveis para o que é externo:** `DnsTxtResolver` (verificação de domínio), `EmailSender` (SMTP), `JobQueue` (pg-boss) e `PaymentGateway` (Asaas). Nos testes, os quatro são trocados por dublês (o pg-boss de verdade só em `jobs.e2e-spec.ts`).
 - **Trabalho em segundo plano sem fila:** emails de recuperação, convite e encerramento são disparados sem esperar o SMTP. A falha fica no log. No "esqueci minha senha", isso também evita que o tempo de resposta revele se o email existe.
 - **Auditoria síncrona e transacional:** nas escritas, o registro entra na mesma transação da alteração. Se a auditoria falhar, a requisição falha.
 - **Tokens de uso único só como hash** (SHA-256) no banco, consumidos com `UPDATE` condicional, o que impede dois usos simultâneos do mesmo link.

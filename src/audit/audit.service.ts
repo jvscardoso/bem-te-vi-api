@@ -29,6 +29,8 @@ export const AUDIT_ACTIONS = [
   // Conta bloqueada por senhas erradas seguidas (ver LoginAttemptsService). O "ator" é a conta
   // atacada: quem errou a senha não se identificou.
   'auth.login_locked',
+  // Contratação do plano (assinatura da clínica). Sem CPF/CNPJ de cobrança nos detalhes.
+  'subscription.contract',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

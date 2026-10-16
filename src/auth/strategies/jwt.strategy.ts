@@ -36,7 +36,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         roleId: true,
         status: true,
         passwordVersion: true,
-        tenant: { select: { status: true } },
+        tenant: {
+          select: {
+            status: true,
+            subscription: { select: { status: true, trialEndsAt: true, pastDueSince: true } },
+          },
+        },
         role: { select: { permissions: { select: { permission: { select: { key: true } } } } } },
         sessions: { where: { id: payload.sid }, select: { revokedAt: true, expiresAt: true } },
       },
@@ -60,6 +65,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       roleId: user.roleId,
       permissions: user.role.permissions.map((rp) => rp.permission.key),
       sessionId: payload.sid,
+      subscription: user.tenant.subscription,
     };
   }
 }

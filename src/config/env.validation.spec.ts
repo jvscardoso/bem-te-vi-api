@@ -22,4 +22,16 @@ describe('validateEnv', () => {
   it('em produção aceita um segredo forte', () => {
     expect(() => validateEnv({ NODE_ENV: 'production', JWT_SECRET: STRONG })).not.toThrow();
   });
+
+  it('Asaas: sem chave sobe (contratação desligada); com chave, exige URL do mesmo ambiente e token do webhook', () => {
+    const prod = { NODE_ENV: 'production', JWT_SECRET: STRONG, ASAAS_WEBHOOK_TOKEN: 'tok' };
+    expect(() => validateEnv({ ...prod, ASAAS_API_KEY: '' })).not.toThrow();
+    expect(() => validateEnv({ ...prod, ASAAS_API_KEY: '$aact_hmlg_x' })).not.toThrow();
+    expect(() => validateEnv({ ...prod, ASAAS_API_KEY: '$aact_prod_x', ASAAS_API_URL: 'https://api.asaas.com/v3' })).not.toThrow();
+    expect(() => validateEnv({ ...prod, ASAAS_API_KEY: '$aact_prod_x' })).toThrow(/aponta para o sandbox/);
+    expect(() =>
+      validateEnv({ ...prod, ASAAS_API_KEY: '$aact_hmlg_x', ASAAS_API_URL: 'https://api.asaas.com/v3' }),
+    ).toThrow(/aponta para a produção/);
+    expect(() => validateEnv({ ...prod, ASAAS_API_KEY: '$aact_hmlg_x', ASAAS_WEBHOOK_TOKEN: '' })).toThrow(/ASAAS_WEBHOOK_TOKEN/);
+  });
 });

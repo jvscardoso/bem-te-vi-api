@@ -24,10 +24,13 @@ import { LegalAcceptanceDto } from '../legal/dto/legal-acceptance.dto.js';
 import { Public } from './decorators/public.decorator.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from './types/auth.types.js';
+import { SubscriptionExempt } from '../subscriptions/subscription-exempt.decorator.js';
 
 // Rotas públicas sensíveis (login e fluxos por email) com o mesmo limite apertado: 5/min por IP.
 const STRICT = { default: { limit: 5, ttl: 60_000 } };
 
+// Sessão e conta funcionam com a assinatura vencida: é por /auth/me que o front sabe do bloqueio.
+@SubscriptionExempt()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

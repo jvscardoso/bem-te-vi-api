@@ -17,6 +17,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { SessionsService } from './sessions.service.js';
 import { LoginAttemptsService } from './login-attempts.service.js';
 import type { AuthenticatedUser, JwtPayload } from './types/auth.types.js';
+import { subscriptionSummary } from '../subscriptions/subscription-access.js';
 
 const SALT_ROUNDS = 12;
 
@@ -258,7 +259,7 @@ export class AuthService {
   // `pendingLegalDocuments`: Termos/Política cuja versão vigente o usuário ainda não aceitou
   // (usuário criado com senha pelo admin, ou versão nova publicada). O frontend bloqueia o uso
   // até o aceite em POST /auth/me/legal-acceptances.
-  async me({ sessionId: _sessionId, ...actor }: AuthenticatedUser) {
+  async me({ sessionId: _sessionId, subscription: _timing, ...actor }: AuthenticatedUser) {
     const [user, pendingLegalDocuments] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: actor.userId },
@@ -266,7 +267,14 @@ export class AuthService {
           name: true,
           email: true,
           role: { select: { id: true, name: true } },
-          tenant: { select: { timezone: true } },
+          tenant: {
+            select: {
+              timezone: true,
+              subscription: {
+                select: { planId: true, status: true, trialEndsAt: true, pastDueSince: true, currentPeriodEnd: true },
+              },
+            },
+          },
         },
       }),
       this.legal.pending(actor.userId),
@@ -280,6 +288,7 @@ export class AuthService {
       role: user.role,
       timezone: user.tenant.timezone,
       pendingLegalDocuments,
+      subscription: subscriptionSummary(user.tenant.subscription),
     };
   }
 

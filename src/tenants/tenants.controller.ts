@@ -30,6 +30,7 @@ import { UpdateTenantBrandingDto } from './dto/update-tenant-branding.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { TenantParam } from '../auth/decorators/tenant-param.decorator.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
+import { SubscriptionExempt } from '../subscriptions/subscription-exempt.decorator.js';
 
 // O :id aqui É o tenantId (o tenant é o próprio recurso), por isso @TenantParam('id')
 // no lugar do default 'tenantId' que os outros controllers (aninhados) usam.
@@ -100,10 +101,12 @@ export class TenantsController {
   }
 
   // ---- Saída da clínica (LGPD) ----
+  // Tudo isento da assinatura: mesmo bloqueada, a clínica consegue levar os dados e encerrar.
 
   // Todos os dados da clínica num arquivo. Exige as duas permissões: é a base de pacientes e
   // prontuários inteira, então não basta gerenciar a clínica nem exportar um paciente.
   @RequirePermissions('tenant:manage', 'patients:export')
+  @SubscriptionExempt()
   @Header('Cache-Control', 'no-store')
   @Get(':id/export')
   async exportAll(
@@ -118,6 +121,7 @@ export class TenantsController {
   }
 
   @RequirePermissions('tenant:manage')
+  @SubscriptionExempt()
   @Get(':id/closure')
   async getClosure(@Param('id') id: string) {
     const tenant = await this.tenantsService.findOne(id);
@@ -125,6 +129,7 @@ export class TenantsController {
   }
 
   @RequirePermissions('tenant:manage')
+  @SubscriptionExempt()
   @HttpCode(HttpStatus.OK)
   @Post(':id/closure')
   requestClosure(
@@ -136,6 +141,7 @@ export class TenantsController {
   }
 
   @RequirePermissions('tenant:manage')
+  @SubscriptionExempt()
   @Delete(':id/closure')
   cancelClosure(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.closure.cancelClosure(id, actor);

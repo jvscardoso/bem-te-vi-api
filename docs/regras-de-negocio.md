@@ -21,6 +21,20 @@ SaaS **whitelabel** de gestão de clínicas. Cada clínica (tenant) tem a própr
 - **Duração de atendimento:** padrão (30 min) e mínima (5 min) por clínica. A padrão não pode ser menor que a mínima, e a mínima não pode ficar acima da duração própria de algum profissional.
 - **Suspensão** é ação da plataforma, nunca da própria clínica. Clínica suspensa: ninguém loga, sessões abertas caem e a marca pública responde `404`.
 
+## Assinatura (mensalidade da plataforma)
+
+Decisão 11. Cobrança pelo Asaas.
+
+- **Planos** por clínica: Individual R$ 99 (1 profissional), Essencial R$ 149 (até 5), Profissional R$ 299 (até 10, + R$ 29 por profissional extra), Completo R$ 549 (até 20, + R$ 25 por extra). **Anual:** 12 meses com 10% de desconto.
+- **Teste grátis de 14 dias**, sem cartão, no Essencial, a partir do cadastro.
+- **Contratação** pelo admin (`tenant:manage`): escolhe plano, ciclo e forma de pagamento (Pix, boleto, cartão ou "escolho na hora") e informa os dados de cobrança (nome, CPF ou CNPJ, email), que podem ser de outra pessoa. A API devolve o link da página de pagamento do Asaas; o cartão nunca passa pela plataforma. Contratar durante o teste não encurta o teste: a primeira cobrança vence no fim dele. Uma clínica contrata uma vez só (troca de plano fica para depois).
+- A clínica passa a **ativa** quando o pagamento é confirmado (Pix, boleto ou cartão), e fica paga até o vencimento da cobrança + um ciclo.
+- **Fim do teste sem pagamento:** 30 dias em **só leitura** (vê tudo, não altera nada), depois **bloqueada**.
+- **Cobrança vencida** (de quem já pagou alguma vez): **7 dias de carência** com acesso completo e aviso; depois só leitura por 30 dias; depois bloqueada. Pagar devolve o acesso na hora.
+- **Mesmo bloqueada**, a clínica entra no sistema, contrata, exporta os dados (da clínica e de cada paciente) e pede o encerramento: nunca fica sem levar os próprios dados (LGPD).
+- Todos os usuários veem a situação da assinatura (aviso de teste, atraso, só leitura); só o admin vê os detalhes e contrata.
+- **Ainda não:** nota fiscal automática, troca de plano (decidido: subir vale na hora, descer no ciclo seguinte), limite de profissionais por plano e cobrança por uso.
+
 ## Configurações de tela
 
 - **Layout da tela inicial:** quais blocos aparecem, em que ordem e com que largura (inteira, 2/3, metade, 1/3). **Um por clínica**, igual para a equipe toda; quem tem `tenant:manage` edita ou volta ao padrão. Todo usuário da clínica lê.

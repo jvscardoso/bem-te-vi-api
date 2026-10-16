@@ -88,7 +88,7 @@ Fonte da verdade: `prisma/schema.prisma`; explicação completa em [docs/banco-d
 
 ## Estrutura
 
-Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
+Cada domínio de negócio é um módulo Nest em `src/` — `tenants`, `users`, `roles`, `access`, `patients`, `anamnesis-templates`, `appointments`, `billing`, `audit`, `legal`, `account`, `mail`, `configs`, `jobs`, `subscriptions`, `platform` —, todos falando com o banco via `PrismaService` (`src/prisma`). O papel de cada um e o caminho de uma requisição (guards, validação, tratamento de erros) estão em [docs/arquitetura.md](docs/arquitetura.md).
 
 Rotas de negócio são aninhadas sob `/tenants/:tenantId/...`.
 
@@ -128,7 +128,7 @@ Erros que não são de formato (regra de negócio, conflito) continuam com `mess
 }
 ```
 
-`legalAcceptance` é o aceite dos Termos de Uso e da Política de Privacidade vigentes (ver "Termos de Uso e Política de Privacidade"). Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
+`legalAcceptance` é o aceite dos Termos de Uso e da Política de Privacidade vigentes (ver "Termos de Uso e Política de Privacidade"). A clínica nasce em **teste grátis de 14 dias** no plano Essencial, sem cartão (ver "Assinatura da clínica"). Depois disso, o dono já pode logar (`POST /auth/login`) e criar mais usuários/papéis do tenant dele.
 
 A rota é usada pela landing page (outro projeto), então a API valida tudo sozinha:
 - `name` e `owner.name`: obrigatórios, sem aceitar vazio nem só espaços (até 150).
@@ -252,8 +252,9 @@ Resposta: `{ "data": [...], "meta": { "total", "page", "pageSize", "totalPages" 
 - Toda rota é protegida por padrão (`JwtAuthGuard` global). Para deixar uma rota pública, use `@Public()`.
 - `TenantAccessGuard` bloqueia (403) qualquer request cujo `:tenantId` da URL não bata com o `tenantId` do token — impede um usuário de um tenant acessar dados de outro só trocando a URL.
 - `PermissionsGuard` + `@RequirePermissions('patients:write')` etc. checam as permissões atuais do usuário (relidas do banco) contra as exigidas pela rota.
-- `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions, sessionId }` no handler.
-- `GET /auth/me` devolve isso (sem o `sessionId`) mais `name`, `email`, `role: { id, name }` e `timezone` (fuso da clínica, para mostrar horários e "hoje" como a clínica vê; só o admin lê `GET /tenants/:id`) — para o cabeçalho do app, sem depender do que o cliente guardou no login.
+- `SubscriptionAccessGuard` (o último) aplica a situação da assinatura da clínica: em "só leitura" só passa `GET`/`HEAD`, bloqueada nada passa; responde `402` (ver "Assinatura da clínica").
+- `@CurrentUser()` injeta `{ userId, tenantId, roleId, permissions, sessionId, subscription }` no handler (`subscription`: os prazos da assinatura, lidos na mesma consulta do usuário).
+- `GET /auth/me` devolve isso (sem `sessionId` e sem os prazos crus da assinatura) mais `subscription` (resumo para o aviso de teste/atraso, ver "Assinatura da clínica"), `name`, `email`, `role: { id, name }` e `timezone` (fuso da clínica, para mostrar horários e "hoje" como a clínica vê; só o admin lê `GET /tenants/:id`) — para o cabeçalho do app, sem depender do que o cliente guardou no login.
 - Rate limit global de 100 req/min por IP (`@nestjs/throttler`), com limite mais agressivo (5 req/min) em `POST /auth/login` e `PATCH /auth/me/password` contra força bruta.
 - **Bloqueio por conta:** 10 senhas erradas em 15 minutos bloqueiam a conta por 15 minutos (`LoginAttemptsService`), contra o ataque espalhado por muitos IPs, que o limite por IP não pega. Durante o bloqueio, nem a senha certa entra, e a resposta é a mesma `401` "Credenciais inválidas". O contador é pelo hash do email digitado, exista a conta ou não, então ele não revela quais emails existem. O bloqueio de uma conta existente entra na trilha de auditoria da clínica (`auth.login_locked`). Quem foi bloqueado por terceiros pode redefinir a senha pelo email, o que também tira o bloqueio.
 - `helmet` aplica cabeçalhos de segurança padrão (CSP, HSTS, etc.) em todas as respostas.
@@ -387,7 +388,7 @@ Configurações de tela da clínica, uma por clínica, iguais para a equipe toda
 
 Gerencia as clínicas **como contas** (listar, suspender/reativar) — não é um jeito de acessar prontuário, agenda ou anamnese de nenhuma clínica; isso continua isolado por `TenantAccessGuard` como sempre foi, sem exceção.
 
-- `GET /platform/tenants` — paginado (mesmo contrato de pacientes/agenda/usuários), com `_count.users` e `_count.patients` por clínica. A própria clínica-plataforma nunca aparece na lista.
+- `GET /platform/tenants` — paginado (mesmo contrato de pacientes/agenda/usuários), com `_count.users`, `_count.patients` e `subscription` (plano, situação e acesso) por clínica. A própria clínica-plataforma nunca aparece na lista.
   - Cada clínica traz `closureRequestedAt` e `deletionAvailableAt` (pedido + carência de `TENANT_DELETION_GRACE_DAYS`, a mesma conta de `GET /tenants/:id/closure` e da exclusão; `null` sem pedido). O painel habilita "Excluir definitivamente" por ela, sem supor a carência.
   - `?closure=requested`: só clínicas que pediram o encerramento; `?closure=deletable`: só as que já passaram da carência (as que a exclusão aceita). Com o filtro, a ordem é pela data do pedido, do mais antigo ao mais novo; combina com `q` e com a paginação. Valor inválido → `400`.
   - **Busca (`q`):** mesma regra de pacientes — cada palavra precisa casar (em nome, subdomínio **ou** domínio próprio), sem diferenciar maiúsculas/acentos no nome (`unaccent`), curingas do LIKE tratados como texto literal. Útil porque, ao contrário de usuários/papéis por clínica, o número de clínicas cresce com o negócio.
@@ -423,6 +424,27 @@ Cobrança e pagamento nativos — nada disto depende de serviço externo. **Emis
 
 **Resumo (`GET /tenants/:tenantId/billing/summary`)**: totais de pendente, atrasado e cancelado (estado atual) e pago no período (`from`/`to`, por data do pagamento — pendente/atrasado não fazem sentido "num período", só o estado atual).
 
+## Assinatura da clínica (`src/subscriptions`)
+
+Mensalidade da plataforma, cobrada pelo [Asaas](https://docs.asaas.com) (decisão 11, task 29). Escopo do lançamento: teste grátis, contratação com link de pagamento, webhook e modo só leitura. Ficam para depois: nota fiscal automática, troca de plano e cobrança por uso (lembretes, agendamentos pelo bot).
+
+- **Planos** (tabela `plans`, preços em centavos): Individual R$ 99 (1 profissional), Essencial R$ 149 (até 5), Profissional R$ 299 (até 10, + R$ 29 por extra), Completo R$ 549 (até 20, + R$ 25 por extra). Anual: 12 meses com **10% de desconto**. `GET /public/plans` (pública) devolve `{ trialDays, trialPlanId, annualDiscountPercent, data: [{ id, name, monthlyPriceCents, annualPriceCents, maxProfessionals, extraProfessionalCents, monthlyReminders, monthlyBotBookings, monthlyCampaignMessages }] }`, para a landing e a tela de planos não recalcularem nada.
+- **Teste grátis:** todo cadastro (`POST /tenants`) cria a assinatura `trialing` no Essencial, com fim em 14 dias, na mesma transação. A clínica-plataforma não tem assinatura (e nunca é bloqueada).
+- **Acesso** (calculado na hora, a partir dos prazos, sem job; `subscriptionAccess`):
+  - `active`: completo;
+  - `trialing`: completo até o fim do teste; depois **só leitura** por 30 dias; depois **bloqueada**;
+  - `past_due` (cobrança vencida, só para quem já pagou alguma vez): completo por **7 dias de carência** (com aviso); depois só leitura por 30 dias; depois bloqueada.
+- **Só leitura / bloqueada:** `SubscriptionAccessGuard` responde `402` `{ statusCode, error: "Payment Required", code: "subscription_read_only" | "subscription_blocked", message }`. Isentas (`@SubscriptionExempt()`): `/auth/*`, a assinatura (para contratar), as exportações (`GET /tenants/:id/export`, `GET .../patients/:id/export`) e o encerramento da clínica: mesmo bloqueada, a clínica consegue levar os dados (LGPD).
+- `GET /tenants/:id/subscription` (`tenant:manage`): `{ plan, status, cycle, trialEndsAt, currentPeriodEnd, pastDueSince, contracted, contractedAt, paymentUrl, billing: { name, document, email } | null, access, reason, changesAt }`. `reason`: `trial_ended` | `past_due` | `null`; `changesAt`: quando o acesso muda sozinho para o próximo estado.
+- `/auth/me` traz para todo usuário `subscription: { planId, status, trialEndsAt, currentPeriodEnd, access, reason, changesAt } | null`, para o aviso no topo e para esconder botões de alteração.
+- **Contratar:** `POST /tenants/:id/subscription` (`tenant:manage`) com `{ planId, cycle: "monthly" | "yearly", paymentMethod: "pix" | "boleto" | "credit_card" | "any", billing: { name, document (CPF ou CNPJ, com ou sem pontuação), email } }`. Cria o cliente e a assinatura no Asaas e devolve a assinatura com `paymentUrl` (a página do Asaas onde a clínica paga; o cartão nunca passa pela API). Com o teste ainda valendo, a primeira cobrança vence no fim dele; senão, hoje (no fuso da clínica). A clínica continua `trialing` até o pagamento chegar.
+  - `400`: dados inválidos, plano inexistente ou dado recusado pelo Asaas (com a mensagem dele); `409`: já contratado (clique duplo também: lock por clínica, só uma assinatura no Asaas); `502`: Asaas fora do ar; `503`: Asaas não configurado (`ASAAS_API_KEY` vazia).
+  - Auditoria `subscription.contract` (plano, ciclo, forma de pagamento, valor; sem CPF/CNPJ).
+- **Webhook:** `POST /webhooks/asaas` (pública, sem rate limit), autenticada pelo header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN` (`401` sem ele). Cada evento é gravado pelo id (`asaas_webhook_events`): reenvio é confirmado sem reprocessar. `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` → `active`, `currentPeriodEnd` = vencimento da cobrança + 1 ciclo, sai do atraso; `PAYMENT_OVERDUE` (só de `active`) → `past_due`; `PAYMENT_CREATED` → atualiza `paymentUrl`. Evento de cobrança avulsa ou de assinatura desconhecida: `200` e ignorado.
+- **Configuração:** `ASAAS_API_URL` (padrão: sandbox), `ASAAS_API_KEY` (entre aspas simples no `.env`: começa com `$`) e `ASAAS_WEBHOOK_TOKEN` (o mesmo cadastrado no webhook do painel do Asaas, com os eventos de cobrança). Em produção, a API não sobe com chave de sandbox na URL de produção (ou o contrário), nem com chave e sem token do webhook.
+- **`PaymentGateway` plugável**, como o `EmailSender`: `AsaasPaymentGateway` na API, `FakePaymentGateway` nos e2e (nenhum teste fala com o Asaas).
+- **Backoffice:** `GET /platform/tenants` traz `subscription` de cada clínica (plano, situação, prazos e acesso; sem dados de cobrança).
+
 ## CI (`.github/workflows/ci.yml`)
 
 Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e `docker-smoke` só começam depois de `checks` passar, para não gastar minutos de CI num branch com erro de lint/tipo:
@@ -441,12 +463,12 @@ Roda em todo push em `main` e em cada pull request. Cinco jobs; `unit`, `e2e` e 
 
 Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o Insomnia também importa):
 
-- `bem-te-vi.postman_collection.json` — 10 pastas, 96 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca (inclui configurações de tela), papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), isolamento entre clínicas e logout.
+- `bem-te-vi.postman_collection.json` — 11 pastas, 102 requisições, em ordem de uso: saúde, autenticação (inclui validação do cadastro e refresh do token), clínica e marca (inclui configurações de tela), papéis, usuários, regras de conta, pacientes (busca/paginação/restauração, trilha de auditoria, formulário e ficha de anamnese), agenda (janela, status, conflitos), assinatura (planos, situação, contratação, webhook sem token), isolamento entre clínicas e logout.
 - `bem-te-vi.local.postman_environment.json` — ambiente com `baseUrl` (`http://localhost:3000`).
 
 **Como usar:** suba a API, importe os dois arquivos (o Postman guarda o cookie de sessão sozinho e o reenvia no refresh e no logout), selecione o ambiente e rode as pastas **em ordem** (a `01` cria a clínica e grava o token; as demais reaproveitam `tenantId`, `accessToken`, ids etc., gravados por scripts). Também roda tudo de uma vez no Collection Runner. Cada execução cria clínicas novas (sufixo aleatório), então pode repetir sem conflito. Cada requisição traz uma descrição da regra que demonstra e asserções do resultado esperado (inclusive os erros: 401, 403, 404, 409...).
 
-**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 96 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
+**Limites em dev:** 100 requisições/min por IP no total, 5/min em `POST /auth/login` e 10/min em `POST /tenants`. Uma execução completa faz 102 requisições e 4 logins, então espere ~1 min entre execuções completas (senão vem `429`).
 
 **Insomnia:** os scripts (que gravam as variáveis e checam as respostas) só funcionam em versões com suporte à API `pm.*`; senão, copie os valores para as variáveis manualmente. Não testei a importação no Insomnia.
 
@@ -488,6 +510,7 @@ Em `docs/api/` há uma coleção com todas as rotas, em formato Postman v2.1 (o 
   - `tenant-closure.e2e-spec.ts` — saída da clínica: exportação completa sem nenhum segredo (logo em base64, convites pendentes não vazam token) e com as duas permissões exigidas; pedido de encerramento com senha, carência de 30 dias, emails para quem pediu e para a plataforma, cancelamento e auditoria; exclusão pela plataforma só com pedido, depois da carência e confirmando o subdomínio, apagando tudo e deixando a prova em `TenantDeletion`.
   - `timezone.e2e-spec.ts` — fuso da clínica: padrão, nome canônico, recusa de deslocamento fixo e de nome inválido (mensagem em português), no cadastro e no PATCH, em `/auth/me`, e o atraso de cobrança pelo "hoje" do fuso (dois fusos com mais de 24 h de diferença).
   - `patient-contact.e2e-spec.ts` — telefone normalizado (cadastro, edição, limpeza, número não reconhecível, só leitura) e o SQL da migration concordando com `normalizePhone`; consentimento (padrão "não", envio parcial, histórico sem duplicar, auditoria com de → para, validação, permissão, removido, isolamento, exportações).
+  - `subscriptions.e2e-spec.ts` — assinatura: planos públicos (preço anual com 10%), teste de 14 dias no cadastro e no `/auth/me`, permissões e isolamento, contratação (validação, valor e vencimento enviados ao Asaas, auditoria, 409, clique duplo, 503/400/502 do gateway), webhook (token, evento repetido, confirmado + recebido sem contar dois períodos, atraso, link novo, eventos ignorados), só leitura (`402` em escrita), bloqueio (rotas isentas: `/auth`, assinatura, exportações, encerramento), pagamento devolvendo o acesso, carência de atraso, clínica-plataforma e painel.
   - `jobs.e2e-spec.ts` — faxina diária (agendamento e o que apaga e o que mantém) e o pg-boss de verdade (fila criada, agendamento gravado, job executado).
   - `configs.e2e-spec.ts` — configurações de tela: nada salvo (`home: null`), salvar com `updatedAt`/`updatedBy`, leitura por qualquer usuário e escrita só com `tenant:manage`, substituição e lista vazia, tipo de bloco desconhecido aceito, tela desconhecida (404), validação (largura, id repetido, mais de 24, versão, formato, campo extra), voltar ao padrão (idempotente) e isolamento.
   - `frontend-support.e2e-spec.ts` — catálogo de permissões (sem `platform:*` para clínicas), lista de profissionais com `appointments:read` (só ativos, duração efetiva, campos mínimos), `/auth/me` completo, nomes relacionados em agenda/financeiro (`paidCents`/`balanceCents`, `recordedBy`) e `null` limpando `birthDate`/`address` de paciente.

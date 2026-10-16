@@ -68,8 +68,95 @@ model Tenant {
   anamnesisTemplates AnamnesisTemplate[]
   auditLogs     AuditLog[]
   configs       TenantConfig[]
+  subscription  TenantSubscription?
 
   @@map("tenants")
+}
+
+// =============================================================================
+// ASSINATURA DAS CLÍNICAS (decisão 11, task 29)
+// =============================================================================
+
+// Plano oferecido às clínicas. Os números ficam aqui, e não no código: mudar preço ou limite é
+// atualizar a linha (numa migration de dado), sem deploy. O id é um código estável ("essencial").
+model Plan {
+  id                      String  @id @db.VarChar(40)
+  name                    String  @db.VarChar(80)
+  monthlyPriceCents       Int     @map("monthly_price_cents")
+  // Profissionais (usuários com appointments:attend) incluídos, e o preço de cada um além disso
+  // (null = não dá para passar da faixa: sobe de plano).
+  maxProfessionals        Int     @map("max_professionals")
+  extraProfessionalCents  Int?    @map("extra_professional_cents")
+  // Limites mensais do WhatsApp (decisão 11). Ainda sem uso: o WhatsApp está em espera (task 30).
+  monthlyReminders        Int     @map("monthly_reminders")
+  monthlyBotBookings      Int     @map("monthly_bot_bookings")
+  monthlyCampaignMessages Int     @map("monthly_campaign_messages")
+  // Ordem na tela de planos; plano inativo não aparece para contratar novas assinaturas.
+  sortOrder               Int     @map("sort_order")
+  active                  Boolean @default(true)
+
+  subscriptions           TenantSubscription[]
+
+  @@map("plans")
+}
+
+enum SubscriptionStatus {
+  // Teste grátis (14 dias, sem cartão). Continua assim depois de contratar, até o primeiro pagamento.
+  trialing
+  // Pagamento em dia.
+  active
+  // Cobrança vencida e não paga (carência, depois só leitura).
+  past_due
+}
+
+enum BillingCycle {
+  monthly
+  yearly
+}
+
+// Assinatura da clínica: uma por clínica, criada no cadastro (em teste). O acesso (completo, só
+// leitura ou bloqueado) é calculado a partir dela a cada requisição (ver subscription-access.ts),
+// e não guardado: assim não depende de um job para virar "só leitura" na hora certa.
+model TenantSubscription {
+  tenantId            String             @id @map("tenant_id")
+  planId              String             @map("plan_id") @db.VarChar(40)
+  status              SubscriptionStatus @default(trialing)
+  cycle               BillingCycle       @default(monthly)
+  trialEndsAt         DateTime           @map("trial_ends_at")
+  // Fim do período já pago (renovado a cada pagamento confirmado).
+  currentPeriodEnd    DateTime?          @map("current_period_end")
+  // Desde quando a cobrança está vencida (status past_due).
+  pastDueSince        DateTime?          @map("past_due_since")
+  // Gateway (Asaas). Preenchidos na contratação.
+  asaasCustomerId     String?            @map("asaas_customer_id") @db.VarChar(64)
+  asaasSubscriptionId String?            @unique @map("asaas_subscription_id") @db.VarChar(64)
+  // Link da cobrança em aberto (página de pagamento do Asaas: Pix, boleto ou cartão).
+  paymentUrl          String?            @map("payment_url")
+  // Dados de cobrança, pedidos só na contratação (o teste não pede nada).
+  billingName         String?            @map("billing_name") @db.VarChar(150)
+  billingDocument     String?            @map("billing_document") @db.VarChar(14)
+  billingEmail        String?            @map("billing_email") @db.VarChar(150)
+  contractedAt        DateTime?          @map("contracted_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan                Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@map("tenant_subscriptions")
+}
+
+// Notificação recebida do Asaas. O id é o do evento no Asaas: a entrega é "pelo menos uma vez", e o
+// mesmo evento que chega de novo bate na chave e é ignorado. Também serve de histórico. Sem FK:
+// o evento sobrevive à clínica.
+model AsaasWebhookEvent {
+  id          String    @id @db.VarChar(100)
+  event       String    @db.VarChar(80)
+  payload     Json
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@map("asaas_webhook_events")
 }
 
 // Configurações de tela da clínica (ex.: "layouts.home", o layout da tela inicial). Uma linha

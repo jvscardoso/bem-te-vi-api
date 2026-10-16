@@ -1,14 +1,14 @@
 # Status atual da aplicação
 
-*Atualizado em 14/10/2026.* Retrato do MVP da API: o que está pronto, o que está em andamento e o que falta. Ponto de partida para uma sessão nova de desenvolvimento.
+*Atualizado em 15/10/2026.* Retrato do MVP da API: o que está pronto, o que está em andamento e o que falta. Ponto de partida para uma sessão nova de desenvolvimento.
 
 ## Resumo
 
-A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada** e a **revisão de segurança para produção (task 19) foi feita**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
+A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, anamnese, agenda, financeiro, painel da plataforma), a **seção de LGPD foi implementada**, a **revisão de segurança para produção (task 19) foi feita** e a **assinatura das clínicas pelo Asaas (task 29, escopo de lançamento) está pronta**. O que falta para lançar é infraestrutura de produção, algumas decisões de produto e a implementação das tasks correspondentes no frontend.
 
 **Indicadores (última rodada local):**
-- 116 testes unitários e 560 e2e passando.
-- Coleção do Postman: 96 requisições e 156 asserções verdes contra a stack em Docker.
+- 128 testes unitários e 578 e2e passando.
+- Coleção do Postman: 102 requisições e 170 asserções verdes contra a stack em Docker.
 - `audit-ci` (dependências de produção) e gitleaks (histórico do git) limpos.
 - Typecheck e oxlint limpos.
 
@@ -19,6 +19,7 @@ A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, ana
 | Clínica | Cadastro público com aceite de termos e validação completa (texto obrigatório, subdomínio DNS válido e não reservado, domínio próprio fora do domínio da plataforma); configurações de duração; suspensão pela plataforma |
 | Fuso horário | Por clínica (IANA); "hoje" do financeiro no fuso dela |
 | Fila e agendador | pg-boss no próprio Postgres; faxina diária de sessões e contadores de login |
+| Assinatura | Planos (`GET /public/plans`), teste de 14 dias no cadastro, contratação com link de pagamento do Asaas, webhook (pagamento confirmado, atraso, cobrança nova), só leitura e bloqueio (`402`) com exportação e encerramento sempre liberados, situação no `/auth/me` e no painel |
 | Configurações de tela | Layout da tela inicial por clínica (`/configs`), editado por quem tem `tenant:manage`, lido por todos |
 | Whitelabel | Marca, upload de logo, domínio próprio com verificação DNS, marca pública por host, login restrito ao endereço |
 | Acesso | Login (tempo constante, sem enumeração, bloqueio por conta depois de 10 senhas erradas), sessões com token de acesso de 15 min + refresh rotativo em cookie `HttpOnly` + logout que vale na hora, JWT com estado relido a cada requisição, RBAC com 15 permissões, sem escalada de privilégio, sempre um admin, convite por email, troca, redefinição e recuperação de senha |
@@ -26,7 +27,7 @@ A **API do MVP está funcionalmente completa** (clínica, acesso, pacientes, ana
 | Anamnese | Formulários configuráveis, fichas validadas e imutáveis |
 | Agenda | Duração por profissional ou clínica, sem sobreposição (com lock), transições de status, janela por sobreposição, escopo própria × todas, profissional = quem tem `appointments:attend` |
 | Financeiro | Cobranças, pagamentos parciais (com lock), atraso calculado, resumo |
-| Painel da plataforma | Listar e buscar (com filtro de encerramento pedido ou pronto para excluir), suspender e reativar, excluir clínica encerrada |
+| Painel da plataforma | Listar e buscar (com filtro de encerramento pedido ou pronto para excluir, e a assinatura de cada clínica), suspender e reativar, excluir clínica encerrada |
 | LGPD | Trilha de auditoria imutável; aceite de Termos e Política; exportação do paciente; exportação completa e encerramento de conta |
 | Validação | Erros em português em toda a API, com `errors: [{ field, code, message }]` |
 | Operação | Docker (API + Postgres + Mailpit), CI com 5 jobs (inclui auditoria de dependências e varredura de segredos), CORS fechado, recusa de segredo fraco em produção, logs sem dado sensível, `TRUST_PROXY`, rate limit, helmet |
@@ -52,7 +53,7 @@ Antes de criar uma task, veja o maior número nos dois índices.
 | 18 | Configurações de tela (`/configs`), começando pelo layout da tela inicial | Média | ✅ Feita em 14/10/2026 (front: task 26) |
 | 19 | Revisão de segurança antes de produção (par da task 20 do front) | Alta (antes de produção) | ✅ Feita em 14/10/2026 (front: task 21) |
 
-A situação detalhada fica no índice. Todos os pedidos do front até aqui (12 a 19) estão feitos na API.
+A situação detalhada fica no índice. Todos os pedidos do front até aqui (12 a 19) estão feitos na API. Do produto: a 29 (assinatura pelo Asaas) está feita no escopo de lançamento (15/10/2026; front: task 31) e a 30 (WhatsApp) está em espera.
 
 **Revisão de segurança (task 19), registrada em 14/10/2026:**
 - **CORS** fechado (`CorsOriginPolicy`): domínio base e subdomínios, domínios próprios verificados, `CORS_EXTRA_ORIGINS` e localhost fora de produção.
@@ -65,7 +66,7 @@ A situação detalhada fica no índice. Todos os pedidos do front até aqui (12 
 
 ### Tasks para o front
 
-Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma), a 26 (ligar o salvar do editor da tela inicial), a 27 (remover o modo `?tenant=` em dev) e a 28 (fuso da clínica, telefone normalizado e consentimento do paciente). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
+Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21 (sessão: token em memória, refresh e logout, ⚠️ **o front atual perde a sessão a cada 15 minutos até ela ser feita**) a 22 (formato novo dos erros de validação e regras do cadastro) a 23 (`appointments:attend`: duração só para quem atende, rótulo em Papéis) a 24 (nome do paciente na tela de Auditoria) a 25 (filtro de encerramentos no painel da plataforma), a 26 (ligar o salvar do editor da tela inicial), a 27 (remover o modo `?tenant=` em dev) a 28 (fuso da clínica, telefone normalizado e consentimento do paciente) e a 31 (assinatura: tela de planos, contratação, avisos e o `402`; ⚠️ **sem ela, a clínica em só leitura vê erro genérico em toda alteração**, e as clínicas que já existem entram em só leitura 14 dias depois do deploy). As tasks 01 a 11 foram escritas aqui, antes da convenção, e entregues ao front; a situação delas é desconhecida deste lado:
 
 | Task | Assunto | Observação |
 |---|---|---|
@@ -86,7 +87,7 @@ Em `../bem-te-vi-web/docs/changes/`: a 20 (segurança do front, par da 19), a 21
 
 **Em espera desde 14/10/2026 (o lançamento vem antes):** automação do WhatsApp e campanhas. O decidido está consolidado na task 30 (`docs/changes/30-atendimento-whatsapp-fase-1.md`). Detalhes: 8. **Marketing, atendimento por WhatsApp** (BSP, pg-boss, construtor de fluxos, começar pelo lembrete com confirmação; falta escolher o provedor e o opt-in; as conversas são pagas pela plataforma, incluídas nos planos da decisão 11). **Fase 0 feita em 14/10/2026:** fuso da clínica, telefone normalizado, consentimento e fila. 9. **Marketing, campanhas** (segmentos e campanhas; perguntas sobre sexo/gênero, duração e canal). 10. **Provedor do WhatsApp:** recomendação **Gupshup** (a plataforma paga as mensagens, incluídas nos planos; a Twilio quase dobra o custo por lembrete), falta confirmar. Ver `docs/decisoes/08` a `10`.
 
-**Decidida:** 11. **Planos e preços** (14/10/2026): por clínica, Individual R$ 99 / Essencial R$ 149 / Profissional R$ 299 / Completo R$ 549, com franquia de lembretes e limite de agendamentos pelo bot; teste de 14 dias sem cartão no Essencial, sem WhatsApp (depois, só leitura por 30 dias e suspensão); desconto anual; Asaas (task 29).
+**Decidida:** 11. **Planos e preços** (14/10/2026): por clínica, Individual R$ 99 / Essencial R$ 149 / Profissional R$ 299 / Completo R$ 549, com franquia de lembretes e limite de agendamentos pelo bot; teste de 14 dias sem cartão no Essencial, sem WhatsApp (depois, só leitura por 30 dias e suspensão); desconto anual de 10%; Asaas (task 29).
 
 **Roadmap** (decidido, sem data): várias unidades da mesma clínica. Ver `docs/roadmap/`.
 
@@ -98,7 +99,7 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 2. **Evolução clínica por consulta.** Recomendação: generalizar a anamnese em "registro clínico" ligado ao agendamento, com adendo. Junto: travar `Appointment.notes` depois de o atendimento ser encerrado (hoje é editável sem histórico).
 3. **Horários de atendimento.** Recomendação: grade semanal que só avisa. **Pré-requisito: fuso horário da clínica, que não existe (tudo é UTC).**
 4. **Lembrete de consulta.** Recomendação: email com link para confirmar. **Pré-requisitos:** fuso da clínica e um agendador de tarefas.
-5. **Cobrança das clínicas pela plataforma.** Recomendação: manual no começo.
+5. ~~**Cobrança das clínicas pela plataforma.**~~ Resolvida pela decisão 11: assinatura pelo Asaas (task 29, feita).
 6. **Confirmação de email no cadastro.** Recomendação: confirmar antes do primeiro login.
 
 ## Falta para lançar
@@ -114,6 +115,8 @@ Analisadas em `docs/decisoes/`, cada uma com opções e recomendação, aguardan
 - Backup do banco com teste de restauração.
 - Monitoramento: captura de erros e logs persistidos.
 - Configurar `TRUST_PROXY` atrás do proxy.
+- **Asaas:** conta de produção aprovada; `ASAAS_API_URL=https://api.asaas.com/v3`, `ASAAS_API_KEY` (de produção) e `ASAAS_WEBHOOK_TOKEN` no ambiente; webhook cadastrado no painel do Asaas apontando para `https://<api>/webhooks/asaas`, com o mesmo token e os eventos de cobrança. Em produção, a API não sobe com chave e URL de ambientes diferentes, nem sem o token.
+- **Antes de cobrar:** testar o fluxo inteiro no sandbox (contratar, pagar o Pix de teste pelo painel do sandbox e ver a clínica virar `active`); para o webhook chegar na máquina local, um túnel (ex.: `cloudflared tunnel --url http://localhost:3000`).
 - Com mais de uma réplica, rodar migrate e seed como passo único de release.
 
 **Jurídico (precisa de advogado):**

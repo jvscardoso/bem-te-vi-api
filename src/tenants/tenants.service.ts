@@ -11,6 +11,7 @@ import { USER_SECRET_FIELDS } from '../common/user-secret-fields.js';
 import { DnsTxtResolver } from './dns-txt-resolver.js';
 import { LegalService } from '../legal/legal.service.js';
 import { TenantAddressPolicy } from './tenant-address-policy.js';
+import { startTrial } from '../subscriptions/subscription-access.js';
 import { CreateTenantDto } from './dto/create-tenant.dto.js';
 import { UpdateTenantDto } from './dto/update-tenant.dto.js';
 import { UpdateTenantBrandingDto } from './dto/update-tenant-branding.dto.js';
@@ -95,6 +96,7 @@ export class TenantsService {
       });
 
       await this.legal.record(tx, ownerUser, legalAcceptance);
+      await startTrial(tx, tenant.id);
 
       return { tenant, role: { id: role.id, name: role.name }, owner: ownerUser };
     });

@@ -1,6 +1,6 @@
 # 11 · Planos e preços
 
-**Situação:** ✅ **decidida em 14/10/2026** (planos, teste e desconto anual). Em aberto: o percentual do desconto anual e os custos operacionais (adiados: a infraestrutura inicial vai rodar no serviço de um possível sócio). Muda a decisão 05 (cobrança das clínicas) e decide a 10 (provedor do WhatsApp): se as mensagens entram no plano, quem paga a Meta é a plataforma.
+**Situação:** ✅ **decidida em 14/10/2026** (planos, teste e desconto anual). Em aberto: os custos operacionais (adiados: a infraestrutura inicial vai rodar no serviço de um possível sócio). Muda a decisão 05 (cobrança das clínicas) e decide a 10 (provedor do WhatsApp): se as mensagens entram no plano, quem paga a Meta é a plataforma.
 **Pesquisa feita em:** 14/10/2026. Preços de concorrentes conforme sites e comparativos públicos; **confira antes de publicar a tabela**.
 
 ## O que o mercado cobra (software de clínica no Brasil)
@@ -47,7 +47,7 @@ Com Meta direto, **quem paga é a clínica**, com o cartão dela (a Meta não de
 - **Aprovado:** preços revistos (R$ 149 / R$ 299 / R$ 549), os nomes (Essencial, Profissional, Completo), um plano **Individual** mais limitado (1 profissional, 200 lembretes) e **limite de agendamentos pelo bot** por plano.
 - **Custos operacionais: adiados.** A infraestrutura inicial vai rodar no serviço de um possível sócio.
 - **Teste:** libera o **Essencial, sem WhatsApp** (nenhuma mensagem paga durante o teste, e nada de cadastro na Meta antes de a clínica contratar). Ao fim do teste sem contratar: **só leitura por 30 dias** (dá para ver e exportar os dados), **depois suspensão**.
-- **Desconto anual: sim** (percentual a definir).
+- **Desconto anual: 10%** sobre o preço mensal × 12 (a sugestão de "2 meses grátis", ≈ 17%, foi recusada).
 
 ## Planos (aprovados como ponto de partida em 14/10/2026)
 
@@ -126,7 +126,6 @@ Com esses números, a conta por plano é: **preço − custo variável médio (m
 
 ## Ainda em aberto
 
-- [ ] **Percentual do desconto anual.** Sugestão: **2 meses grátis** (pagar 10, levar 12; ≈ 17%), formato comum no mercado e fácil de comunicar. O Asaas cobra o plano anual como assinatura de ciclo anual.
 - [ ] **Provedor do WhatsApp (decisão 10):** recomendação **Gupshup** (a mais barata entre os que cobram a plataforma; a Twilio cobra também as mensagens recebidas e quase dobra o custo por lembrete). Falta confirmar.
 - [ ] **Custos operacionais:** levantar quando a infraestrutura estiver definida, para conferir as margens.
 

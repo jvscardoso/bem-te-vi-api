@@ -11,6 +11,13 @@ import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { DnsTxtResolver } from '../../src/tenants/dns-txt-resolver.js';
 import { EmailSender, type EmailMessage } from '../../src/mail/email-sender.js';
 import { JobQueue } from '../../src/jobs/job-queue.js';
+import {
+  PaymentGateway,
+  PaymentGatewayRejection,
+  PaymentGatewayUnavailable,
+  type GatewayCustomer,
+  type GatewaySubscription,
+} from '../../src/subscriptions/payment-gateway.js';
 
 // Dublê de email: guarda as mensagens em vez de enviar. Todo app de teste usa um (nenhum
 // teste fala com SMTP); quem testa email passa o seu e lê `messages`.
@@ -46,6 +53,42 @@ export class FakeJobQueue extends JobQueue {
 
   registered(name: string) {
     return this.definitions.get(name);
+  }
+}
+
+// Dublê do Asaas: guarda clientes e assinaturas criados e devolve ids previsíveis. Nenhum teste
+// fala com o Asaas. `reject` simula o Asaas recusando o dado (400); `fail`, o Asaas fora do ar.
+export class FakePaymentGateway extends PaymentGateway {
+  customers: (GatewayCustomer & { id: string })[] = [];
+  subscriptions: (GatewaySubscription & { id: string })[] = [];
+  isEnabled = true;
+  reject: string | null = null;
+  fail = false;
+
+  enabled() {
+    return this.isEnabled;
+  }
+
+  async upsertCustomer(customer: GatewayCustomer, existingId: string | null) {
+    if (this.fail) {
+      throw new PaymentGatewayUnavailable('fora do ar');
+    }
+    if (this.reject) {
+      throw new PaymentGatewayRejection(this.reject);
+    }
+    const id = existingId ?? `cus_${uniq()}`;
+    this.customers.push({ ...customer, id });
+    return id;
+  }
+
+  async createSubscription(subscription: GatewaySubscription) {
+    const id = `sub_${uniq()}`;
+    this.subscriptions.push({ ...subscription, id });
+    return id;
+  }
+
+  async firstPayment(subscriptionId: string) {
+    return { id: `pay_${subscriptionId}`, invoiceUrl: `https://sandbox.asaas.com/i/${subscriptionId}` };
   }
 }
 
@@ -86,7 +129,12 @@ export interface TestTenant extends TestUser {
 // (não dá para apontar um TXT real num domínio de teste); os demais arquivos usam o real,
 // que nunca chega a ser chamado por eles.
 export async function createTestApp(
-  opts: { dnsTxtResolver?: DnsTxtResolver; emailSender?: EmailSender; jobQueue?: JobQueue | 'real' } = {},
+  opts: {
+    dnsTxtResolver?: DnsTxtResolver;
+    emailSender?: EmailSender;
+    jobQueue?: JobQueue | 'real';
+    paymentGateway?: PaymentGateway;
+  } = {},
 ): Promise<TestApp> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ThrottlerStorage)
@@ -103,6 +151,7 @@ export async function createTestApp(
   if (opts.jobQueue !== 'real') {
     builder.overrideProvider(JobQueue).useValue(opts.jobQueue ?? new FakeJobQueue());
   }
+  builder.overrideProvider(PaymentGateway).useValue(opts.paymentGateway ?? new FakePaymentGateway());
   if (opts.dnsTxtResolver) {
     builder.overrideProvider(DnsTxtResolver).useValue(opts.dnsTxtResolver);
   }

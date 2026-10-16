@@ -3539,7 +3539,235 @@
       ]
     },
     {
-      "name": "08 · Isolamento entre clínicas",
+      "name": "08 · Assinatura (planos e contratação)",
+      "description": "Mensalidade da clínica, cobrada pelo Asaas. A clínica nasce em teste grátis de 14 dias; vencido o teste sem pagamento, fica só leitura (alterações dão `402`) e depois bloqueada. A liberação vem do webhook do Asaas, que não dá para simular daqui (exige o token do webhook).",
+      "item": [
+        {
+          "name": "Planos (público)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/public/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "plans"
+              ]
+            },
+            "description": "Preço mensal e anual (12 meses com 10% de desconto), limites e o prazo do teste. Usado pela landing e pela tela de planos.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"teste de 14 dias\", () => pm.expect(b.trialDays === 14).to.be.true);",
+                  "pm.test(\"4 planos\", () => pm.expect(b.data.length === 4).to.be.true);",
+                  "pm.test(\"anual com 10% de desconto\", () => pm.expect(b.data.find(p => p.id === 'essencial').annualPriceCents === 160920).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Situação no /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Todo usuário recebe `subscription` (para o aviso de teste, atraso ou só leitura)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"em teste\", () => pm.expect(b.subscription.status === 'trialing').to.be.true);",
+                  "pm.test(\"acesso completo\", () => pm.expect(b.subscription.access === 'full').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver a assinatura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "subscription"
+              ]
+            },
+            "description": "Só `tenant:manage`. Plano, situação, prazos, link de pagamento e dados de cobrança."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"ainda não contratada\", () => pm.expect(b.contracted === false).to.be.true);",
+                  "pm.test(\"plano do teste\", () => pm.expect(b.plan.id === 'essencial').to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Contratar com CNPJ inválido",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "subscription"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"essencial\",\n  \"cycle\": \"monthly\",\n  \"paymentMethod\": \"any\",\n  \"billing\": {\n    \"name\": \"Clínica {{suffix}} LTDA\",\n    \"document\": \"11.222.333/0001-82\",\n    \"email\": \"financeiro-{{suffix}}@exemplo.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"erro no documento\", () => pm.expect(b.errors.some(e => e.field === 'billing.document')).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Contratar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenants/{{tenantId}}/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenants",
+                "{{tenantId}}",
+                "subscription"
+              ]
+            },
+            "description": "Cria cliente e assinatura no Asaas e devolve `paymentUrl` (a página de pagamento). Sem `ASAAS_API_KEY` no ambiente (o padrão em dev e no CI), responde `503`; com a chave de sandbox, `201` de verdade no sandbox.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"profissional\",\n  \"cycle\": \"yearly\",\n  \"paymentMethod\": \"any\",\n  \"billing\": {\n    \"name\": \"Clínica {{suffix}} LTDA\",\n    \"document\": \"11.222.333/0001-81\",\n    \"email\": \"financeiro-{{suffix}}@exemplo.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 (Asaas configurado) ou 503 (sem chave)', () => pm.expect([201, 503]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) { const b = pm.response.json(); pm.test('link de pagamento', () => pm.expect(b.paymentUrl).to.be.a('string')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Webhook sem o token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/asaas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "asaas"
+              ]
+            },
+            "description": "O Asaas manda o token no header `asaas-access-token`. Sem ele (ou errado): 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"evt_{{suffix}}\",\n  \"event\": \"PAYMENT_CONFIRMED\",\n  \"payment\": {\n    \"id\": \"pay_x\",\n    \"subscription\": \"sub_x\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 · Isolamento entre clínicas",
       "description": "Cria uma segunda clínica (B) e prova que ela não enxerga nem altera dados da clínica A.",
       "item": [
         {
@@ -3828,7 +4056,7 @@
       ]
     },
     {
-      "name": "09 · Sair (logout)",
+      "name": "10 · Sair (logout)",
       "description": "Encerra a sessão da clínica A no servidor: o token de acesso dela para de valer na hora, sem esperar os 15 minutos, e o cookie de refresh deixa de renovar. Rode por último.",
       "item": [
         {

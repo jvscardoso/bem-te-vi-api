@@ -719,10 +719,72 @@ const agenda = folder(
   ],
 );
 
-// ---------- 08 · Isolamento entre clínicas ----------
+// ---------- 08 · Assinatura ----------
+
+const assinatura = folder(
+  '08 · Assinatura (planos e contratação)',
+  'Mensalidade da clínica, cobrada pelo Asaas. A clínica nasce em teste grátis de 14 dias; vencido o teste sem pagamento, fica só leitura (alterações dão `402`) e depois bloqueada. A liberação vem do webhook do Asaas, que não dá para simular daqui (exige o token do webhook).',
+  [
+    req('Planos (público)', 'GET', '/public/plans', {
+      auth: 'none',
+      description: 'Preço mensal e anual (12 meses com 10% de desconto), limites e o prazo do teste. Usado pela landing e pela tela de planos.',
+      test: [
+        status(200),
+        json,
+        check('teste de 14 dias', 'b.trialDays === 14'),
+        check('4 planos', 'b.data.length === 4'),
+        check('anual com 10% de desconto', "b.data.find(p => p.id === 'essencial').annualPriceCents === 160920"),
+      ],
+    }),
+    req('Situação no /auth/me', 'GET', '/auth/me', {
+      description: 'Todo usuário recebe `subscription` (para o aviso de teste, atraso ou só leitura).',
+      test: [
+        status(200),
+        json,
+        check('em teste', "b.subscription.status === 'trialing'"),
+        check('acesso completo', "b.subscription.access === 'full'"),
+      ],
+    }),
+    req('Ver a assinatura', 'GET', '/tenants/{{tenantId}}/subscription', {
+      description: 'Só `tenant:manage`. Plano, situação, prazos, link de pagamento e dados de cobrança.',
+      test: [status(200), json, check('ainda não contratada', 'b.contracted === false'), check('plano do teste', "b.plan.id === 'essencial'")],
+    }),
+    req('Contratar com CNPJ inválido', 'POST', '/tenants/{{tenantId}}/subscription', {
+      body: {
+        planId: 'essencial',
+        cycle: 'monthly',
+        paymentMethod: 'any',
+        billing: { name: 'Clínica {{suffix}} LTDA', document: '11.222.333/0001-82', email: 'financeiro-{{suffix}}@exemplo.com' },
+      },
+      test: [status(400), json, check('erro no documento', "b.errors.some(e => e.field === 'billing.document')")],
+    }),
+    req('Contratar', 'POST', '/tenants/{{tenantId}}/subscription', {
+      description:
+        'Cria cliente e assinatura no Asaas e devolve `paymentUrl` (a página de pagamento). Sem `ASAAS_API_KEY` no ambiente (o padrão em dev e no CI), responde `503`; com a chave de sandbox, `201` de verdade no sandbox.',
+      body: {
+        planId: 'profissional',
+        cycle: 'yearly',
+        paymentMethod: 'any',
+        billing: { name: 'Clínica {{suffix}} LTDA', document: '11.222.333/0001-81', email: 'financeiro-{{suffix}}@exemplo.com' },
+      },
+      test: [
+        "pm.test('201 (Asaas configurado) ou 503 (sem chave)', () => pm.expect([201, 503]).to.include(pm.response.code));",
+        "if (pm.response.code === 201) { const b = pm.response.json(); pm.test('link de pagamento', () => pm.expect(b.paymentUrl).to.be.a('string')); }",
+      ],
+    }),
+    req('Webhook sem o token', 'POST', '/webhooks/asaas', {
+      auth: 'none',
+      description: 'O Asaas manda o token no header `asaas-access-token`. Sem ele (ou errado): 401.',
+      body: { id: 'evt_{{suffix}}', event: 'PAYMENT_CONFIRMED', payment: { id: 'pay_x', subscription: 'sub_x' } },
+      test: [status(401)],
+    }),
+  ],
+);
+
+// ---------- 09 · Isolamento ----------
 
 const isolamento = folder(
-  '08 · Isolamento entre clínicas',
+  '09 · Isolamento entre clínicas',
   'Cria uma segunda clínica (B) e prova que ela não enxerga nem altera dados da clínica A.',
   [
     req('Criar clínica B (signup)', 'POST', '/tenants', {
@@ -773,10 +835,10 @@ const isolamento = folder(
   ],
 );
 
-// ---------- 09 · Sair ----------
+// ---------- 10 · Sair ----------
 
 const sair = folder(
-  '09 · Sair (logout)',
+  '10 · Sair (logout)',
   'Encerra a sessão da clínica A no servidor: o token de acesso dela para de valer na hora, sem esperar os 15 minutos, e o cookie de refresh deixa de renovar. Rode por último.',
   [
     req('Logout', 'POST', '/auth/logout', {
@@ -815,7 +877,7 @@ const collection = {
     { key: 'baseUrl', value: 'http://localhost:3000' },
     { key: 'password', value: 'Senha@12345' },
   ],
-  item: [saude, autenticacao, clinica, papeis, usuarios, regras, pacientes, agenda, isolamento, sair],
+  item: [saude, autenticacao, clinica, papeis, usuarios, regras, pacientes, agenda, assinatura, isolamento, sair],
 };
 
 const environment = {

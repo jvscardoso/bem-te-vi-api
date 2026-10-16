@@ -27,10 +27,12 @@ Tenant ─┬─ TenantBranding (1:1)        Permission (catálogo global)
         │           ├─ Appointment ── User (profissional)
         │           └─ Charge ── Payment
         │                 └── Appointment (opcional, do mesmo paciente)
+        ├─ TenantSubscription (1:1) ── Plan (catálogo global)
         └─ AuditLog (sem FK para usuário/paciente)
 
 TenantDeletion (sem FK nenhuma: sobra depois da exclusão da clínica)
 LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
+AsaasWebhookEvent (sem FK: eventos recebidos do Asaas, pelo id do evento)
 ```
 
 ## Tabelas
@@ -55,6 +57,14 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `RefreshToken` (`refresh_tokens`) | Refresh tokens da sessão (rotativos) | Só o hash SHA-256; `expiresAt` (12 h sem uso, nunca além da sessão); `usedAt` marca o token já trocado (reuso = roubo) |
 | `LoginAttempt` (`login_attempts`) | Senhas erradas por conta | Chave = hash do email digitado (existente ou não); `failedCount` na janela de 15 min; `lockedUntil`. Contadores parados há mais de 1 dia são apagados nas falhas seguintes |
 | `LegalAcceptance` (`legal_acceptances`) | Aceite de Termos (`terms`) e Política (`privacy`) | Uma linha por aceite, nunca sobrescrita; versão, IP e navegador |
+
+### Assinatura (mensalidade da plataforma)
+
+| Modelo (tabela) | Para que serve | Pontos importantes |
+|---|---|---|
+| `Plan` (`plans`) | Catálogo **global** de planos | `id` legível (`individual`, `essencial`, `profissional`, `completo`); preço mensal em centavos (o anual é calculado: 12 meses com 10% de desconto); limites (profissionais, adicional por profissional, lembretes, agendamentos pelo bot, mensagens de campanha); `active` e `sortOrder`. Mudar preço = mudar a linha |
+| `TenantSubscription` (`tenant_subscriptions`) | Assinatura da clínica | Chave = `tenant_id` (1:1, apaga junto com a clínica); `status` (`trialing`/`active`/`past_due`), `cycle` (`monthly`/`yearly`), `trial_ends_at`, `current_period_end`, `past_due_since`; ids do cliente e da assinatura no Asaas (`asaas_subscription_id` único); link da cobrança em aberto; dados de cobrança (nome, CPF/CNPJ só com dígitos, email). O acesso (completo, só leitura, bloqueado) é calculado na hora a partir dos prazos, não é gravado. A clínica-plataforma não tem linha |
+| `AsaasWebhookEvent` (`asaas_webhook_events`) | Eventos recebidos do Asaas | Chave = id do evento no Asaas (o reenvio não é processado de novo); tipo, conteúdo, recebido e processado em |
 
 ### Pacientes e prontuário
 
@@ -121,6 +131,7 @@ LoginAttempt   (sem FK: contador de senhas erradas por hash de email)
 | `phase0_timezone_phone_consents` | `tenants.timezone`, `patients.phone_e164` (preenchido para os pacientes existentes, com a mesma regra de `normalizePhone`) e `patient_consents` |
 | `tenant_configs` | `tenant_configs` (configurações de tela da clínica) |
 | `session_password_version` | `sessions.password_version` (o refresh recusa sessão aberta antes de uma troca de senha) |
+| `subscriptions` | `plans` (com os 4 planos da decisão 11), `tenant_subscriptions` e `asaas_webhook_events`. Toda clínica existente (exceto a plataforma) ganha um teste de 14 dias no Essencial, contado a partir do deploy |
 
 **Migrations com dado:** as que criam permissões também as concedem a papéis já existentes, para ninguém perder acesso no deploy. "Papel de administrador" = papel com `users:manage` + `roles:manage` + `tenant:manage`, a mesma definição do `AccessPolicyService`.
 

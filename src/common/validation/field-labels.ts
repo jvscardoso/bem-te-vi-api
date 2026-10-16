@@ -98,6 +98,13 @@ const BY_CLASS: Record<string, FieldLabel> = {
   'LayoutWidgetDto.id': m('Id do bloco'),
   'LayoutWidgetDto.type': m('Tipo do bloco'),
   'LayoutWidgetDto.width': f('Largura do bloco'),
+  'ContractSubscriptionDto.planId': m('Plano'),
+  'ContractSubscriptionDto.cycle': m('Ciclo de cobrança'),
+  'ContractSubscriptionDto.paymentMethod': f('Forma de pagamento'),
+  'ContractSubscriptionDto.billing': m('Dados de cobrança'),
+  'BillingDetailsDto.name': m('Nome para a nota'),
+  'BillingDetailsDto.document': m('CPF ou CNPJ'),
+  'BillingDetailsDto.email': m('Email de cobrança'),
 };
 
 export function fieldLabel(className: string | undefined, property: string): FieldLabel {

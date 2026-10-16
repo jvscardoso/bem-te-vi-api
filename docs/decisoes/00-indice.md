@@ -20,7 +20,7 @@ O **esforço** é relativo: **P** (pequeno: um endpoint ou um ajuste de regra), 
 
 | # | Decisão | O que foi decidido | Quando |
 |---|---|---|---|
-| 11 | [Planos e preços](11-planos-e-precos.md) | Por clínica, com faixas de profissionais: Individual R$ 99 (1 profissional, 200 lembretes), Essencial R$ 149 (até 5, 500 lembretes), Profissional R$ 299 (até 10, 1.000 lembretes, 250 agendamentos pelo bot), Completo R$ 549 (até 20, 2.000 lembretes, 500 agendamentos, campanhas). Lembrete excedente a R$ 0,15; teste de 14 dias sem cartão no Essencial, sem WhatsApp (depois, só leitura por 30 dias e suspensão); desconto anual (percentual a definir); Asaas (task 29) | 14/10/2026 |
+| 11 | [Planos e preços](11-planos-e-precos.md) | Por clínica, com faixas de profissionais: Individual R$ 99 (1 profissional, 200 lembretes), Essencial R$ 149 (até 5, 500 lembretes), Profissional R$ 299 (até 10, 1.000 lembretes, 250 agendamentos pelo bot), Completo R$ 549 (até 20, 2.000 lembretes, 500 agendamentos, campanhas). Lembrete excedente a R$ 0,15; teste de 14 dias sem cartão no Essencial, sem WhatsApp (depois, só leitura por 30 dias e suspensão); desconto anual de 10%; Asaas (task 29) | 14/10/2026 |
 | 07 | [Sessão, logout e onde o front guarda o token](07-sessao-e-token.md) | Token de acesso de 15 min em memória + refresh rotativo em cookie `HttpOnly` + `POST /auth/logout`. Domínio próprio exige a API servida no domínio da clínica (proxy) | 14/10/2026 |
 
 Funcionalidades já decididas, mas sem data (como **várias unidades da mesma clínica**), ficam em [`docs/roadmap/`](../roadmap/00-indice.md).

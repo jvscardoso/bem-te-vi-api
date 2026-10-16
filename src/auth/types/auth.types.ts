@@ -1,3 +1,5 @@
+import type { SubscriptionTiming } from '../../subscriptions/subscription-access.js';
+
 export interface JwtPayload {
   sub: string;
   tenantId: string;
@@ -17,4 +19,7 @@ export interface AuthenticatedUser {
   permissions: string[];
   // Sessão do token em uso: a troca de senha derruba as outras e mantém esta.
   sessionId: string;
+  // Assinatura da clínica (prazos), lida junto com o usuário: o SubscriptionAccessGuard decide o
+  // acesso por ela sem outra consulta. null = clínica sem assinatura (a clínica-plataforma).
+  subscription?: SubscriptionTiming | null;
 }

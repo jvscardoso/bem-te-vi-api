@@ -7,6 +7,7 @@ import type { ClosureFilter, ListPlatformTenantsQueryDto } from './dto/list-plat
 import type { UpdateTenantStatusDto } from './dto/update-tenant-status.dto.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
 import { deletionAvailableAt, deletionGraceDays } from '../tenants/tenant-closure.js';
+import { subscriptionAccess } from '../subscriptions/subscription-access.js';
 
 const TENANT_SUMMARY_SELECT = {
   id: true,
@@ -17,6 +18,10 @@ const TENANT_SUMMARY_SELECT = {
   createdAt: true,
   closureRequestedAt: true,
   _count: { select: { users: true, patients: true } },
+  // Sem dados de cobrança (CPF/CNPJ): o painel só precisa saber o plano e a situação.
+  subscription: {
+    select: { planId: true, status: true, cycle: true, trialEndsAt: true, pastDueSince: true, currentPeriodEnd: true, contractedAt: true },
+  },
 } as const;
 
 @Injectable()
@@ -57,6 +62,9 @@ export class PlatformService {
           ? [
               {
                 ...tenant,
+                subscription: tenant.subscription
+                  ? { ...tenant.subscription, ...subscriptionAccess(tenant.subscription) }
+                  : null,
                 deletionAvailableAt: tenant.closureRequestedAt
                   ? deletionAvailableAt(tenant.closureRequestedAt, this.config)
                   : null,

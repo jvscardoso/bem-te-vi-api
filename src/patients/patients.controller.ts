@@ -10,6 +10,7 @@ import { UpdatePatientConsentsDto } from './dto/update-patient-consents.dto.js';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/auth.types.js';
+import { SubscriptionExempt } from '../subscriptions/subscription-exempt.decorator.js';
 
 // Toda rota recebe o ator: cada acesso a dado de paciente entra na trilha de auditoria.
 @Controller('tenants/:tenantId/patients')
@@ -127,6 +128,7 @@ export class PatientsController {
   // Arquivo JSON com tudo o que a clínica guarda sobre o paciente (pedido do titular, LGPD).
   // Baixa como anexo; também funciona com paciente removido.
   @RequirePermissions('patients:export')
+  @SubscriptionExempt()
   @Header('Cache-Control', 'no-store')
   @Get(':id/export')
   async export(
